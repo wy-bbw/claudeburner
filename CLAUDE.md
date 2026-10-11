@@ -2,6 +2,12 @@
 
 Experiment: playing Bitburner (Steam) with Claude writing all the scripts. Fresh save started 2026-10-11.
 
+## Goal
+Fastest progress by **real time**. Start on easy targets, move to harder ones when they pay more net of prep time;
+prep the next target in parallel. Verify every model/claim with the metrics sampler (`bin/metrics.js` + `bridge/report.mjs`,
+baseline vs change, marks in `marks.txt`) — formulas from memory have been wrong before.
+Lesson: every server starts at 4% of max money; low-growth targets need hours of prep (sigma-cosmetics ~5 h), n00dles ~1 min.
+
 ## Setup
 - `node bridge/server.mjs` — Remote API bridge. Game connects to ws://localhost:12525 (Options → Remote API, wss off).
   Pushes `src/**` to `home` on connect and on every change; refreshes `NetscriptDefinitions.d.ts` from the game.
