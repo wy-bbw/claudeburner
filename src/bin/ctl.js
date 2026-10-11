@@ -59,6 +59,7 @@ export async function main(ns) {
   /** @type {string[]} */
   let rooted = [];
   let openers = 0;
+  let focus = ""; // prep target that gets RAM first until it's done
   let nonce = Date.now(); // unique across restarts, so job args never collide with adopted ones
 
   for (let tick = 0; ; tick++) {
@@ -123,6 +124,11 @@ export async function main(ns) {
     const totalRam = rooted.reduce((s, h) => s + ns.getServerMaxRam(h), 0);
     const shareTarget = Math.floor((shareFraction * totalRam) / shareRam);
     let shareThreads = rooted.reduce((s, h) => s + ns.ps(h).filter((p) => p.filename === SHARE).reduce((t, p) => t + p.threads, 0), 0);
+    for (const h of rooted) { // over target (fraction lowered): stop whole hosts' share workers
+      if (shareThreads <= shareTarget) break;
+      const n = ns.ps(h).filter((p) => p.filename === SHARE).reduce((t, p) => t + p.threads, 0);
+      if (n > 0 && ns.scriptKill(SHARE, h)) shareThreads -= n;
+    }
     for (const h of rooted) {
       if (shareThreads >= shareTarget) break;
       const n = Math.min(shareTarget - shareThreads, Math.floor((ns.getServerMaxRam(h) - ns.getServerUsedRam(h)) / shareRam));
@@ -134,11 +140,15 @@ export async function main(ns) {
     // Conservative: reserves each busy hack job's full size, although part of it is still in use.
     const reserved = [...recs.values()].filter((r) => r.mode === "hack" && r.busyUntil > now).reduce((s, r) => s + r.threads, 0);
     const cap = Math.max(1, totalSlots - reserved);
-    for (const { h } of targets) {
+    // Sticky focus: scores shift with level, so without it RAM hops between half-prepped targets.
+    // New focus = best score per remaining prep cycle (a nearly done target beats a better empty one).
+    const preps = targets.filter(({ h }) => rec(h).mode === "prep" && prepMinutes(ns, h, cap) <= PREP_MAX_MIN)
+      .map(({ h, score }) => ({ h, prio: score / (1 + prepThreads(ns, h, rec(h).flights) / cap) }))
+      .sort((a, b) => b.prio - a.prio);
+    if (!preps.some((p) => p.h === focus)) focus = preps[0]?.h ?? "";
+    for (const { h } of [...preps.filter((p) => p.h === focus), ...preps.filter((p) => p.h !== focus)]) {
       if (left() - reserved <= 0) break;
-      const r = rec(h);
-      if (r.mode !== "prep" || prepMinutes(ns, h, cap) > PREP_MAX_MIN) continue;
-      const job = planPrep(ns, h, left() - reserved, r.flights);
+      const job = planPrep(ns, h, left() - reserved, rec(h).flights);
       if (job.g + job.w1 + job.w2 > 0) launch(h, job);
     }
 
@@ -156,6 +166,7 @@ export async function main(ns) {
         money: ns.getServerMoneyAvailable("home"),
         openers,
         slots: { total: totalSlots, free: left(), reserved },
+        focus,
         share: { threads: shareThreads, target: shareTarget, power: ns.getSharePower() },
         targets: targets.slice(0, 12).map(({ h, score }) => {
           const r = rec(h);
@@ -216,6 +227,13 @@ function prepMinutes(ns, t, cap) {
   const secOver = ns.getServerSecurityLevel(t) - ns.getServerMinSecurityLevel(t);
   const threads = growToMax(ns, t, ns.getServerMoneyAvailable(t)) * (1 + GROW_SEC / WEAKEN_SEC) + secOver / WEAKEN_SEC;
   return (Math.ceil(threads / cap) * ns.getWeakenTime(t)) / 60000;
+}
+
+// Total prep threads still needed beyond what's in flight.
+/** @param {NS} ns @param {string} t @param {Flight[]} flights */
+function prepThreads(ns, t, flights) {
+  const job = planPrep(ns, t, Infinity, flights);
+  return job.g + job.w1 + job.w2;
 }
 
 // Prep threads still needed beyond what's in flight, within capacity.
