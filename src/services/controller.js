@@ -13,6 +13,10 @@ const P_SCORE = 0.1;         // fraction used to rank targets
 const PREP_MAX_MIN = 60;     // don't start preps estimated to take longer than this
 const HACK_KEEP_MONEY = 0.5; // a hack-mode target stays in hack mode above this money fraction...
 const HACK_KEEP_SEC = 5;     // ...and below min security + this
+// Prep ends early: the hack job tops up the rest (grow is multiplicative, so the last 25% is cheap),
+// which saves a whole extra prep cycle for a few missing percent. Security stays strict: it slows every op.
+const HACK_START_MONEY = 0.75;
+const HACK_START_SEC = 1;
 
 /** Target lifecycle: prep until min security / max money, then hack. Also the kind of a job. */
 const Mode = Object.freeze({ PREP: "prep", HACK: "hack" });
@@ -23,7 +27,7 @@ const Mode = Object.freeze({ PREP: "prep", HACK: "hack" });
 /** @typedef {{mode: ModeName, busyUntil: number, threads: number, p: number, flights: PrepInFlight[], jobH: number, jobG: number, hEnd: number, gEnd: number}} TargetState */
 
 // Multi-target controller.
-//   Targets are in "prep" mode until min security / max money, then in "hack" mode, where
+//   Targets are in "prep" mode until >= 75% money at ~min security, then in "hack" mode, where
 //   they stay while money >= 50% and security <= min+5 (each hack job also repairs drift).
 //   1. hack-mode targets: one job per weaken time, best modelled $/s per thread slot first
 //   1b. share workers topped up to --rep of all RAM (faction rep boost), out of prep's share
@@ -113,7 +117,7 @@ export async function main(ns) {
       const money = ns.getServerMoneyAvailable(h) / ns.getServerMaxMoney(h);
       const secOver = ns.getServerSecurityLevel(h) - ns.getServerMinSecurityLevel(h);
       if (r.mode === Mode.HACK && (money < HACK_KEEP_MONEY || secOver > HACK_KEEP_SEC)) r.mode = Mode.PREP;
-      else if (r.mode === Mode.PREP && r.flights.length === 0 && money >= 0.99 && secOver <= 0.5) r.mode = Mode.HACK;
+      else if (r.mode === Mode.PREP && r.flights.length === 0 && money >= HACK_START_MONEY && secOver <= HACK_START_SEC) r.mode = Mode.HACK;
     }
 
     /** @param {string} h @param {Job} job */
