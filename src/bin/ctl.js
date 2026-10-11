@@ -8,13 +8,12 @@ const HACK_SEC = 0.002, GROW_SEC = 0.004, WEAKEN_SEC = 0.05;
 const P_MAX = 0.25;          // max fraction stolen per cycle: small bites are cheaper per thread
 const P_SCORE = 0.1;         // fraction used to rank targets
 const PREP_MAX_MIN = 60;     // don't start preps estimated to take longer than this
-const PREP_SHARE = 0.6;      // max share of all slots one long prep may take
 
 // Multi-target controller. Each target runs its own cycle (one job per weaken time):
 //   1. prepped targets get hack jobs first, best modelled $/s per thread slot first
-//   2. targets whose whole prep fits in free RAM are prepped at once; then ONE long prep
-//      (best score with prep <= 60 min) gets at most 60% of all slots, minus a reservation
-//      so prepped targets find their RAM when their cycle restarts
+//   2. remaining RAM (minus a reservation, so busy hack targets find their RAM again)
+//      preps unprepped targets in score order: the best takes all it can use, the next
+//      the rest. Prep grow is delayed to land just after the first weaken, at min security.
 // Runs on a rooted server; never uses home RAM (reserved for agent one-shots).
 // args: [only target] to restrict to a single target (for experiments)
 /** @param {NS} ns */
@@ -32,7 +31,6 @@ export async function main(ns) {
   /** @type {string[]} */
   let rooted = [];
   let openers = 0;
-  let prepping = "";
   let nonce = 0;
 
   for (let tick = 0; ; tick++) {
@@ -58,48 +56,37 @@ export async function main(ns) {
       if (!recs.has(h)) recs.set(h, { busyUntil: 0, kind: "new", threads: 0, p: 0 });
       return /** @type {{busyUntil: number, kind: string, threads: number, p: number}} */ (recs.get(h));
     };
-    const launch = (/** @type {string} */ h, /** @type {{kind: string, p: number, h: number, g: number, w: number}} */ job) => {
+    const launch = (/** @type {string} */ h, /** @type {Job} */ job) => {
       const id = nonce++;
-      const n = run(ns, free, H, job.h, h, id) + run(ns, free, G, job.g, h, id) + run(ns, free, W, job.w, h, id);
-      Object.assign(rec(h), { busyUntil: now + ns.getWeakenTime(h) + 300, kind: job.kind, threads: n, p: job.p });
-      ns.print(`${job.kind} ${h}: h=${job.h} g=${job.g} w=${job.w} p=${job.p.toFixed(3)}`);
+      const tw = ns.getWeakenTime(h);
+      // Prep: grow lands 100 ms after the first weaken (min security), second weaken 100 ms later.
+      const growDelay = job.kind === "prep" && job.w1 > 0 ? Math.max(0, tw - ns.getGrowTime(h) + 100) : 0;
+      const n = run(ns, free, W, job.w1, h, id, 0) + run(ns, free, H, job.h, h, id, 0)
+        + run(ns, free, G, job.g, h, id, growDelay) + run(ns, free, W, job.w2, h, id, 200);
+      Object.assign(rec(h), { busyUntil: now + tw + 500, kind: job.kind, threads: n, p: job.p });
+      ns.print(`${job.kind} ${h}: h=${job.h} g=${job.g} w=${job.w1}+${job.w2} p=${job.p.toFixed(3)}`);
     };
 
     // 1. hack jobs on prepped targets
     for (const { h } of targets) {
       const r = rec(h);
       if (r.busyUntil > now || !isPrepped(ns, h)) continue;
-      if (prepping === h) prepping = "";
       const job = planHack(ns, h, left());
       if (job.h > 0) launch(h, job);
       else r.kind = "starved";
     }
 
-    // 2. prep with what's left, minus the RAM busy hack targets will want back
+    // 2. prep in score order with what's left, minus the RAM busy hack targets will want back.
+    // Conservative: reserves each busy hack job's full size, although part of it is still in use.
     const reserved = [...recs.values()].filter((r) => r.kind === "hack" && r.busyUntil > now).reduce((s, r) => s + r.threads, 0);
-
-    // 2a. cheap preps (whole prep fits now) start immediately, any number of them
+    const cap = Math.max(1, totalSlots - reserved);
     for (const { h } of targets) {
-      if (rec(h).busyUntil > now || isPrepped(ns, h)) continue;
-      const job = planPrep(ns, h, Infinity);
-      if (job.g + job.w > 0 && job.g + job.w <= left() - reserved) launch(h, job);
+      if (left() - reserved <= 0) break;
+      if (rec(h).busyUntil > now || isPrepped(ns, h) || prepMinutes(ns, h, cap) > PREP_MAX_MIN) continue;
+      const job = planPrep(ns, h, left() - reserved);
+      if (job.g + job.w1 + job.w2 > 0) launch(h, job);
     }
-
-    // 2b. one long prep at a time, capped so newly prepped targets still find RAM
-    if (!prepping || isPrepped(ns, prepping) || !targets.some((t) => t.h === prepping)) {
-      prepping = "";
-      const cap = Math.max(1, totalSlots - reserved);
-      for (const { h } of targets) {
-        if (isPrepped(ns, h) || prepMinutes(ns, h, cap) > PREP_MAX_MIN) continue;
-        prepping = h;
-        break;
-      }
-    }
-    if (prepping && rec(prepping).busyUntil <= now) {
-      // Conservative: reserve each busy hack job's full size, although part of it is still in use.
-      const job = planPrep(ns, prepping, Math.max(0, Math.min(left() - reserved, Math.floor(totalSlots * PREP_SHARE))));
-      if (job.g + job.w > 0) launch(prepping, job);
-    }
+    const prepping = targets.filter((t) => rec(t.h).kind === "prep" && rec(t.h).busyUntil > now).map((t) => t.h);
 
     // Metrics sampler follows the best prepped target.
     const top = targets.find((t) => rec(t.h).kind === "hack")?.h ?? targets[0]?.h ?? "";
@@ -165,7 +152,7 @@ function prepMinutes(ns, t, cap) {
   return (Math.ceil(threads / cap) * ns.getWeakenTime(t)) / 60000;
 }
 
-/** @param {NS} ns @param {string} t @param {number} capacity */
+/** @param {NS} ns @param {string} t @param {number} capacity @returns {Job} */
 function planPrep(ns, t, capacity) {
   const sec = ns.getServerSecurityLevel(t), min = ns.getServerMinSecurityLevel(t);
   const money = ns.getServerMoneyAvailable(t), max = ns.getServerMaxMoney(t);
@@ -173,40 +160,42 @@ function planPrep(ns, t, capacity) {
   let g = money < max ? Math.ceil(ns.growthAnalyze(t, max / Math.max(money, 1))) : 0;
   g = Math.max(0, Math.min(g, Math.floor((capacity - w1) / (1 + GROW_SEC / WEAKEN_SEC))));
   const w2 = Math.ceil((g * GROW_SEC) / WEAKEN_SEC);
-  return { kind: "prep", p: 0, h: 0, g, w: w1 + w2 };
+  return { kind: "prep", p: 0, h: 0, g, w1, w2 };
 }
 
 // Largest hack (p <= P_MAX) whose H/G/W threads fit capacity. Target must be prepped.
-/** @param {NS} ns @param {string} t @param {number} capacity */
+/** @param {NS} ns @param {string} t @param {number} capacity @returns {Job} */
 function planHack(ns, t, capacity) {
   const perThread = ns.hackAnalyze(t);
   const cost = (/** @type {number} */ h) => {
     const p = Math.min(h * perThread, 0.95);
     const g = Math.ceil(ns.growthAnalyze(t, 1 / (1 - p)) * 1.05); // margin: grow lands at raised security
     const w = Math.ceil((h * HACK_SEC + g * GROW_SEC) / WEAKEN_SEC) + 1;
-    return { kind: "hack", p, h, g, w };
+    return { kind: "hack", p, h, g, w1: w, w2: 0 };
   };
   let lo = 0, hi = Math.max(1, Math.floor(P_MAX / perThread));
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
     const c = cost(mid);
-    if (c.h + c.g + c.w <= capacity) lo = mid; else hi = mid - 1;
+    if (c.h + c.g + c.w1 <= capacity) lo = mid; else hi = mid - 1;
   }
-  return lo > 0 ? cost(lo) : { kind: "hack", p: 0, h: 0, g: 0, w: 0 };
+  return lo > 0 ? cost(lo) : { kind: "hack", p: 0, h: 0, g: 0, w1: 0, w2: 0 };
 }
+
+/** @typedef {{kind: string, p: number, h: number, g: number, w1: number, w2: number}} Job */
 
 /**
  * Spread threads of script over hosts; returns threads actually started.
  * @param {NS} ns @param {{h: string, n: number}[]} free @param {string} script
- * @param {number} threads @param {string} target @param {number} nonce
+ * @param {number} threads @param {string} target @param {number} nonce @param {number} delay
  */
-function run(ns, free, script, threads, target, nonce) {
+function run(ns, free, script, threads, target, nonce, delay) {
   let started = 0;
   for (const f of free) {
     if (started >= threads) break;
     const n = Math.min(f.n, threads - started);
     if (n < 1) continue;
-    if (ns.exec(script, f.h, n, target, nonce)) {
+    if (ns.exec(script, f.h, n, target, nonce, delay)) {
       f.n -= n;
       started += n;
     }
