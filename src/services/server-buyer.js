@@ -1,6 +1,8 @@
 const NAME_PREFIX = "cloud-";
 const LOG_FILE = "data/server-buyer.txt";
 const CHECK_INTERVAL_MS = 10_000;
+const CONTROLLER_STATE_FILE = "data/state.txt";
+const MAX_FREE_SHARE_TO_BUY = 0.1; // buy only when less than 10% of the controller's thread slots are free
 
 // Port openers unlock existing RAM far cheaper than buying it, so their cost stays reserved
 // until they are bought (dark web prices; TOR router bought in the city).
@@ -8,6 +10,7 @@ const TOR_ROUTER_COST = 200e3;
 const PORT_OPENER_COSTS = { "BruteSSH.exe": 500e3, "FTPCrack.exe": 1.5e6, "relaySMTP.exe": 5e6, "HTTPWorm.exe": 30e6, "SQLInject.exe": 250e6 };
 
 // Buys cloud servers (ns.cloud) for the controller, which picks them up like any rooted server.
+//   - only while the controller has < 10% free thread slots (more RAM doesn't help otherwise)
 //   - budget = (money - reserve for the next missing port opener) * --spend
 //   - below the server limit: buy the largest power-of-two RAM the budget allows (>= --min-ram)
 //   - at the limit: upgrade the smallest server to the largest size the budget allows
@@ -24,6 +27,13 @@ export async function main(ns) {
   const log = (/** @type {object} */ entry) => ns.write(LOG_FILE, JSON.stringify({ time: Date.now(), ...entry }) + "\n", "a");
 
   while (true) {
+    // Only buy RAM when the controller actually runs short of it (early in a round the targets,
+    // not the RAM, are the bottleneck). The controller's snapshot is on home: reading it is free.
+    const freeShare = controllerFreeShare(ns);
+    if (freeShare > MAX_FREE_SHARE_TO_BUY) {
+      await ns.sleep(CHECK_INTERVAL_MS);
+      continue;
+    }
     const reserve = nextPortOpenerCost(ns);
     const budget = Math.max(0, ns.getServerMoneyAvailable("home") - reserve) * spendFraction;
     const owned = ns.cloud.getServerNames();
@@ -50,6 +60,17 @@ export async function main(ns) {
       }
     }
     await ns.sleep(CHECK_INTERVAL_MS);
+  }
+}
+
+/** Share of the controller's thread slots that are free (1 if there is no recent snapshot). @param {NS} ns */
+function controllerFreeShare(ns) {
+  try {
+    const snapshot = JSON.parse(ns.read(CONTROLLER_STATE_FILE));
+    if (Date.now() - snapshot.time > 60_000 || !snapshot.threads?.total) return 1;
+    return snapshot.threads.free / snapshot.threads.total;
+  } catch {
+    return 1;
   }
 }
 
