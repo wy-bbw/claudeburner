@@ -29,7 +29,12 @@ export async function main(ns) {
         error = String(e);
       }
       const passed = result !== "" && !error;
-      ns.write(RESULTS_FILE, toJson({ type, passed, result, error, data, answer }).slice(0, 2000) + "\n", "a");
+      // Keep every line valid JSON: shorten long data/answer fields instead of cutting the line.
+      const shorten = (/** @type {any} */ value) => {
+        const json = toJson(value) ?? "";
+        return json.length > 500 ? `${json.slice(0, 500)}… (${json.length} chars)` : value;
+      };
+      ns.write(RESULTS_FILE, toJson({ type, passed, result, error, data: shorten(data), answer: shorten(answer) }) + "\n", "a");
       if (ns.fileExists(file, host)) ns.rm(file, host);
     }
   }

@@ -33,6 +33,7 @@ export const CONTRACT_SOLVERS = {
   "Encryption II: Vigenère Cipher": ([plaintext, keyword]) => vigenereEncrypt(plaintext, keyword),
   "Square Root": roundedSquareRoot,
   "Total Number of Primes": ([low, high]) => countPrimes(low, high),
+  "Largest Rectangle in a Matrix": largestZeroRectangle,
 };
 
 /** @param {number} from @param {number} to */
@@ -413,6 +414,41 @@ function roundedSquareRoot(data) {
   while (root * root > number) root--;
   while ((root + 1n) * (root + 1n) <= number) root++;
   return number - root * root <= (root + 1n) * (root + 1n) - number ? root : root + 1n;
+}
+
+/**
+ * Largest rectangle without 1s, as its corners [[top, left], [bottom, right]].
+ * Per row, heights[column] = zeros stacked above and including this cell, which turns each row into
+ * "largest rectangle under a histogram". A stack of columns with increasing heights solves that in
+ * O(columns): when a lower bar arrives, every taller bar on the stack can't extend further right, so it
+ * is popped and its rectangle (from just after the bar below it on the stack to here) is measured.
+ * @param {number[][]} matrix
+ */
+function largestZeroRectangle(matrix) {
+  const columns = matrix[0].length;
+  const heights = Array(columns).fill(0);
+  let bestArea = 0;
+  let best = [[0, 0], [0, 0]];
+  matrix.forEach((row, rowIndex) => {
+    row.forEach((cell, column) => { heights[column] = cell === 0 ? heights[column] + 1 : 0; });
+    /** @type {number[]} column indices with increasing heights */
+    const stack = [];
+    for (let column = 0; column <= columns; column++) {
+      const height = column < columns ? heights[column] : 0; // height-0 sentinel at the end flushes the stack
+      while (stack.length > 0 && heights[stack[stack.length - 1]] >= height) {
+        const barHeight = heights[/** @type {number} */ (stack.pop())];
+        const left = stack.length > 0 ? stack[stack.length - 1] + 1 : 0;
+        const right = column - 1;
+        const area = barHeight * (right - left + 1);
+        if (area > bestArea) {
+          bestArea = area;
+          best = [[rowIndex - barHeight + 1, left], [rowIndex, right]];
+        }
+      }
+      stack.push(column);
+    }
+  });
+  return best;
 }
 
 /** Primes in [low, high] with a segmented sieve. @param {number} low @param {number} high */

@@ -16,7 +16,10 @@ export async function main(ns) {
   const toJson = (/** @type {any} */ value) => JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v));
   const log = (/** @type {string} */ event, /** @type {string} */ details) => appendLog(ns, LOG_FILE, event, details);
 
-  const testResults = ns.read(TEST_RESULTS_FILE).split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((r) => r.type);
+  const parseLine = (/** @type {string} */ line) => {
+    try { return JSON.parse(line); } catch { return {}; } // an unreadable line just doesn't vouch for anything
+  };
+  const testResults = ns.read(TEST_RESULTS_FILE).split("\n").filter(Boolean).map(parseLine).filter((r) => r.type);
   const failedTypes = new Set(testResults.filter((r) => !r.passed).map((r) => r.type));
   const trustedTypes = new Set(testResults.filter((r) => r.passed && !failedTypes.has(r.type)).map((r) => r.type));
   log("start", `${trustedTypes.size} verified solver types${failedTypes.size ? `, unverified: ${[...failedTypes].join(", ")}` : ""}`);
