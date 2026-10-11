@@ -1,0 +1,15 @@
+{
+  "name": "bitburner-ai",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bridge": "node bridge/server.mjs",
+    "check": "tsc -p jsconfig.json"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}
