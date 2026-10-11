@@ -21,7 +21,7 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 - Home RAM resets to 8 GB on a new BitNode: everything must still start on 8 GB (start.js 6.95 GB, agent 3.7 GB). The controller runs on a rooted server and uses home only above `--home-reserve` (16 GB).
 - Call port openers explicitly; dynamic `ns[fn]` breaks the RAM calculator.
 - The RAM calculator bills any identifier that matches an ns function, also local functions and properties: `flags.share` cost 2.4 GB (ns.share), a helper named `run` cost 1 GB (ns.run). Avoid such names; check `cli ram` after edits.
-- `data/state.txt` on home is the controller's JSON snapshot; `tools/state.js` is a heavier full dump (4.7 GB).
+- `data/state.txt` on home is the controller's JSON snapshot; `tools/state.js` writes a heavier full dump to `data/full-state.txt` (4.7 GB).
 
 ## Layout (`src/`, synced to home)
 - `start.js`, `agent.js` — top level because the user types them by hand.

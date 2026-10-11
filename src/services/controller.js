@@ -193,7 +193,12 @@ export async function main(ns) {
     // 2. prep-mode targets, minus the RAM hack targets will want back:
     //    busy ones reserve what their finished hack/grow threads freed (the rest is still in use),
     //    idle ones (waiting for RAM) their next job's size, or prep starves them.
-    const reservedThreads = targets.filter(({ target }) => stateOf(target).mode === Mode.HACK).reduce((sum, { target }) => {
+    //    Prep targets already within the start bounds (only waiting for their last prep jobs) reserve
+    //    their first hack job too, or a long prep elsewhere grabs the RAM just before they switch.
+    const aboutToHack = (/** @type {string} */ target) => stateOf(target).mode === Mode.PREP
+      && ns.getServerMoneyAvailable(target) >= ns.getServerMaxMoney(target) * START_HACKING_MIN_MONEY
+      && ns.getServerSecurityLevel(target) - ns.getServerMinSecurityLevel(target) <= START_HACKING_MAX_EXTRA_SECURITY;
+    const reservedThreads = targets.filter(({ target }) => stateOf(target).mode === Mode.HACK || aboutToHack(target)).reduce((sum, { target }) => {
       const job = stateOf(target).hackJob;
       if (job) return sum + (now >= job.hackEndsAt ? job.hackThreads : 0) + (now >= job.growEndsAt ? job.growThreads : 0);
       return sum + jobThreads(planHack(ns, target, totalThreads));

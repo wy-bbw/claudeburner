@@ -1,6 +1,6 @@
 import { scanAll } from "lib/net.js";
 
-// Dumps a JSON snapshot of the game to data/state.txt for the outside world.
+// Dumps a full JSON snapshot of the game (player, every server, running scripts) to data/full-state.txt.
 /** @param {NS} ns */
 export async function main(ns) {
   const parents = scanAll(ns);
@@ -31,6 +31,6 @@ export async function main(ns) {
     programs: ns.ls("home", ".exe"),
     servers,
   };
-  ns.write("data/state.txt", JSON.stringify(state), "w");
+  ns.write("data/full-state.txt", JSON.stringify(state), "w");
   ns.tprint(`state: ${servers.length} servers, $${ns.format.number(state.player.money)}`);
 }
