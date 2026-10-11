@@ -12,6 +12,7 @@ const HACK_SEC = 0.002, GROW_SEC = 0.004, WEAKEN_SEC = 0.05;
 //   hack:  largest hack fraction p whose H/G/W thread counts fit free RAM,
 //          so the server ends each cycle back at min security / max money.
 // Runs on a rooted server; never uses home RAM (reserved for agent one-shots).
+// args: [fixed target]
 /** @param {NS} ns */
 export async function main(ns) {
   ns.disableLog("ALL");
@@ -31,7 +32,7 @@ export async function main(ns) {
     const rooted = hosts.filter((h) => ns.hasRootAccess(h) && ns.getServerMaxRam(h) > 0);
     for (const h of rooted) if (h !== self) ns.scp([H, G, W], h, "home");
 
-    const best = pickTarget(ns, rooted);
+    const best = ns.args[0] ? String(ns.args[0]) : pickTarget(ns, rooted);
     if (best && best !== target) {
       target = best;
       ns.clearPort(TARGET_PORT);

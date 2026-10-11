@@ -6,7 +6,7 @@ const WORKER = "w/hgw.js";
 const STATE = "data/state.txt";
 
 // Early-game orchestrator (superseded by bin/ctl.js, kept for comparison).
-// Meant to run on a rooted server, not home.
+// Meant to run on a rooted server, not home. args: [fixed target]
 // Every tick: root what we can, pick a target, fill free RAM with workers,
 // publish a state snapshot to home for the bridge.
 /** @param {NS} ns */
@@ -22,7 +22,7 @@ export async function main(ns) {
     for (const h of hosts) tryRoot(ns, h, openers);
     const rooted = hosts.filter((h) => ns.hasRootAccess(h));
 
-    const best = pickTarget(ns, rooted);
+    const best = ns.args[0] ? String(ns.args[0]) : pickTarget(ns, rooted);
     if (best && best !== target) {
       target = best;
       ns.clearPort(TARGET_PORT);
