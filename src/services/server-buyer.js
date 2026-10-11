@@ -11,7 +11,7 @@ const PORT_OPENER_COSTS = { "BruteSSH.exe": 500e3, "FTPCrack.exe": 1.5e6, "relay
 
 // Buys cloud servers (ns.cloud) for the controller, which picks them up like any rooted server.
 //   - only while the controller has < 10% free thread slots (more RAM doesn't help otherwise)
-//   - budget = (money - reserve for the next missing port opener) * --spend
+//   - budget = (money - reserve for the next two missing port openers / TOR) * --spend
 //   - below the server limit: buy the largest power-of-two RAM the budget allows (>= --min-ram)
 //   - at the limit: upgrade the smallest server to the largest size the budget allows
 // Stops when every server is at the game's RAM limit. Log: data/server-buyer.txt
@@ -34,7 +34,7 @@ export async function main(ns) {
       await ns.sleep(CHECK_INTERVAL_MS);
       continue;
     }
-    const reserve = nextPortOpenerCost(ns);
+    const reserve = portOpenerReserve(ns);
     const budget = Math.max(0, ns.getServerMoneyAvailable("home") - reserve) * spendFraction;
     const owned = ns.cloud.getServerNames();
 
@@ -74,11 +74,15 @@ function controllerFreeShare(ns) {
   }
 }
 
-/** Cost of the cheapest thing still missing on the way to all port openers (TOR first). @param {NS} ns */
-function nextPortOpenerCost(ns) {
-  if (!ns.hasTorRouter()) return TOR_ROUTER_COST;
-  const missing = Object.entries(PORT_OPENER_COSTS).filter(([program]) => !ns.fileExists(program, "home"));
-  return missing.length ? Math.min(...missing.map(([, cost]) => cost)) : 0;
+/**
+ * Cost of the next two things still missing on the way to all port openers (TOR first): the
+ * one the player is saving for now plus the one after, so a purchase never delays either.
+ * @param {NS} ns
+ */
+function portOpenerReserve(ns) {
+  const missingCosts = Object.entries(PORT_OPENER_COSTS).filter(([program]) => !ns.fileExists(program, "home")).map(([, cost]) => cost);
+  if (!ns.hasTorRouter()) missingCosts.unshift(TOR_ROUTER_COST);
+  return missingCosts.sort((a, b) => a - b).slice(0, 2).reduce((sum, cost) => sum + cost, 0);
 }
 
 /**
