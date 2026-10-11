@@ -4,14 +4,16 @@ const CHECK_INTERVAL_MS = 10_000;
 const CONTROLLER_STATE_FILE = "data/state.txt";
 const MAX_FREE_SHARE_TO_BUY = 0.1; // buy only when less than 10% of the controller's thread slots are free
 
-// Port openers unlock existing RAM far cheaper than buying it, so their cost stays reserved
-// until they are bought (dark web prices; TOR router bought in the city).
-const TOR_ROUTER_COST = 200e3;
-const PORT_OPENER_COSTS = { "BruteSSH.exe": 500e3, "FTPCrack.exe": 1.5e6, "relaySMTP.exe": 5e6, "HTTPWorm.exe": 30e6, "SQLInject.exe": 250e6 };
+// Port openers that unlock RAM cheaper than cloud servers ($55k/GB). Measured in round 1:
+// BruteSSH ~$4k/GB, FTPCrack ~$7k, relaySMTP ~$6k, HTTPWorm ~$43k (plus new targets).
+// SQLInject (~$215k/GB) is not on the list: past HTTPWorm, servers are the cheaper RAM.
+const CHEAPER_THAN_SERVERS = ["BruteSSH.exe", "FTPCrack.exe", "relaySMTP.exe", "HTTPWorm.exe"];
 
 // Buys cloud servers (ns.cloud) for the controller, which picks them up like any rooted server.
+//   - only after the player owns TOR and every port opener cheaper per GB than servers
+//     (buying programs needs the Singularity API / SF4, so the player does that by hand)
 //   - only while the controller has < 10% free thread slots (more RAM doesn't help otherwise)
-//   - budget = (money - reserve for the next two missing port openers / TOR) * --spend
+//   - budget = money * --spend
 //   - below the server limit: buy the largest power-of-two RAM the budget allows (>= --min-ram)
 //   - at the limit: upgrade the smallest server to the largest size the budget allows
 // Stops when every server is at the game's RAM limit. Log: data/server-buyer.txt
@@ -29,13 +31,11 @@ export async function main(ns) {
   while (true) {
     // Only buy RAM when the controller actually runs short of it (early in a round the targets,
     // not the RAM, are the bottleneck). The controller's snapshot is on home: reading it is free.
-    const freeShare = controllerFreeShare(ns);
-    if (freeShare > MAX_FREE_SHARE_TO_BUY) {
+    if (!cheaperPortOpenersOwned(ns) || controllerFreeShare(ns) > MAX_FREE_SHARE_TO_BUY) {
       await ns.sleep(CHECK_INTERVAL_MS);
       continue;
     }
-    const reserve = portOpenerReserve(ns);
-    const budget = Math.max(0, ns.getServerMoneyAvailable("home") - reserve) * spendFraction;
+    const budget = ns.getServerMoneyAvailable("home") * spendFraction;
     const owned = ns.cloud.getServerNames();
 
     if (owned.length < serverLimit) {
@@ -74,15 +74,9 @@ function controllerFreeShare(ns) {
   }
 }
 
-/**
- * Cost of the next two things still missing on the way to all port openers (TOR first): the
- * one the player is saving for now plus the one after, so a purchase never delays either.
- * @param {NS} ns
- */
-function portOpenerReserve(ns) {
-  const missingCosts = Object.entries(PORT_OPENER_COSTS).filter(([program]) => !ns.fileExists(program, "home")).map(([, cost]) => cost);
-  if (!ns.hasTorRouter()) missingCosts.unshift(TOR_ROUTER_COST);
-  return missingCosts.sort((a, b) => a - b).slice(0, 2).reduce((sum, cost) => sum + cost, 0);
+/** True once TOR and every port opener that is cheaper RAM than servers are owned. @param {NS} ns */
+function cheaperPortOpenersOwned(ns) {
+  return ns.hasTorRouter() && CHEAPER_THAN_SERVERS.every((program) => ns.fileExists(program, "home"));
 }
 
 /**
