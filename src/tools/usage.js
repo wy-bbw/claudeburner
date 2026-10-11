@@ -55,7 +55,9 @@ export async function main(ns) {
   lines.push("", `${"TARGET".padEnd(20)}${"HACK".padStart(8)}${"GROW".padStart(8)}${"WEAKEN".padStart(8)}`);
   const targetRows = [...threadsByTarget].sort((a, b) => sum(b[1]) - sum(a[1]));
   for (const [target, perScript] of targetRows) {
-    const threads = (/** @type {string} */ worker) => String(perScript.get(WORKER_PREFIX + worker) ?? 0).padStart(8);
+    // Controller workers (hack.js) and batcher workers (batch-hack.js) share a column.
+    const threads = (/** @type {string} */ worker) =>
+      String((perScript.get(WORKER_PREFIX + worker) ?? 0) + (perScript.get(`${WORKER_PREFIX}batch-${worker}`) ?? 0)).padStart(8);
     lines.push(`${target.padEnd(20)}${threads("hack.js")}${threads("grow.js")}${threads("weaken.js")}`);
   }
 

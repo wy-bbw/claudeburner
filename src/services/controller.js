@@ -7,6 +7,7 @@ const SHARE_WORKER = "workers/share.js";
 // Pre-rename worker paths; their running jobs are still adopted (and old share workers stopped).
 const LEGACY_GROW_WORKER = "w/g.js", LEGACY_WEAKEN_WORKER = "w/w.js", LEGACY_SHARE_WORKER = "w/share.js";
 const STATE_FILE = "data/state.txt";
+const START_SCRIPT = "start.js";
 
 // Security change per thread (game constants).
 const SECURITY_PER_HACK_THREAD = 0.002, SECURITY_PER_GROW_THREAD = 0.004, SECURITY_PER_WEAKEN_THREAD = 0.05;
@@ -92,6 +93,11 @@ export async function main(ns) {
 
   for (let tick = 0; ; tick++) {
     if (tick % 10 === 0) {
+      // Formulas.exe bought: start.js replaces this controller with services/batcher.js.
+      if (ns.fileExists("Formulas.exe", "home") && ns.exec(START_SCRIPT, "home", 1, ...ns.args)) {
+        ns.print("Formulas.exe owned: handing over to the batcher via start.js");
+        await ns.sleep(60_000); // start.js kills this process
+      }
       const hosts = [...scanAll(ns).keys()].filter((host) => host !== "home");
       portOpeners = countOpeners(ns);
       for (const host of hosts) tryRoot(ns, host, portOpeners);
