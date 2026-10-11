@@ -252,7 +252,8 @@ export async function main(ns) {
 
 /**
  * After a restart, adopt grow/weaken jobs still running from the previous controller (upper-bound
- * timing) so they aren't launched twice. Targets already at max money were being hacked: they stay
+ * timing) so they aren't launched twice. Targets with enough money to start hacking were (almost
+ * certainly) being hacked: they stay
  * in hack mode, busy until the adopted jobs end, instead of losing a whole cycle of income.
  * @param {NS} ns @param {(target: string) => TargetState} stateOf @param {Map<string, TargetState>} targetStates
  */
@@ -273,7 +274,7 @@ function adoptRunningJobs(ns, stateOf, targetStates) {
     }
   }
   for (const [target, state] of targetStates) {
-    if (ns.getServerMoneyAvailable(target) < ns.getServerMaxMoney(target) * 0.99) continue;
+    if (ns.getServerMoneyAvailable(target) < ns.getServerMaxMoney(target) * START_HACKING_MIN_MONEY) continue;
     const endsAt = Math.max(...state.prepsInFlight.map((prep) => prep.endsAt));
     const totalThreads = state.prepsInFlight.reduce((sum, prep) => sum + prep.growThreads + prep.weakenThreads, 0);
     state.mode = Mode.HACK;
