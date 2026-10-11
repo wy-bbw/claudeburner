@@ -203,7 +203,8 @@ export async function main(ns) {
       && ns.getServerSecurityLevel(target) - ns.getServerMinSecurityLevel(target) <= START_HACKING_MAX_EXTRA_SECURITY;
     const reservedThreads = targets.filter(({ target }) => stateOf(target).mode === Mode.HACK || aboutToHack(target)).reduce((sum, { target }) => {
       const job = stateOf(target).hackJob;
-      if (job) return sum + (now >= job.hackEndsAt ? job.hackThreads : 0) + (now >= job.growEndsAt ? job.growThreads : 0);
+      // Adopted after a restart (fraction 0, unknown shape): reserve the full next job like an idle target.
+      if (job && job.hackFraction > 0) return sum + (now >= job.hackEndsAt ? job.hackThreads : 0) + (now >= job.growEndsAt ? job.growThreads : 0);
       return sum + jobThreads(planHack(ns, target, totalThreads));
     }, 0);
     const prepCapacity = Math.max(1, totalThreads - reservedThreads);
@@ -293,7 +294,7 @@ function adoptRunningJobs(ns, stateOf, targetStates) {
 }
 
 /** @param {Job} job */
-function jobThreads(job) {
+export function jobThreads(job) {
   return job.hackThreads + job.growThreads + job.weakenThreads + job.weakenAfterGrowThreads;
 }
 
@@ -363,7 +364,7 @@ function planPrep(ns, target, availableThreads, prepsInFlight) {
 // Largest hack (fraction <= MAX_HACK_FRACTION) whose threads fit availableThreads; grow and weaken
 // also repair any drift (money below max, security above min) so a hack-mode target stays healthy.
 /** @param {NS} ns @param {string} target @param {number} availableThreads @returns {Job} */
-function planHack(ns, target, availableThreads) {
+export function planHack(ns, target, availableThreads) {
   const money = ns.getServerMoneyAvailable(target);
   const extraSecurity = ns.getServerSecurityLevel(target) - ns.getServerMinSecurityLevel(target);
   const stolenPerThread = ns.hackAnalyze(target);
