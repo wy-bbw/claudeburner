@@ -2,7 +2,7 @@ import { scanAll } from "lib/net.js";
 import { countOpeners, tryRoot } from "lib/targets.js";
 import { TARGET_PORT } from "w/hgw.js";
 
-const H = "w/h.js", G = "w/g.js", W = "w/w.js";
+const H = "w/h.js", G = "w/g.js", W = "w/w.js", SHARE = "w/share.js";
 const STATE = "data/state.txt";
 const HACK_SEC = 0.002, GROW_SEC = 0.004, WEAKEN_SEC = 0.05;
 const P_MAX = 0.25;          // max fraction stolen per cycle: small bites are cheaper per thread
@@ -11,17 +11,23 @@ const PREP_MAX_MIN = 60;     // don't start preps estimated to take longer than 
 
 // Multi-target controller. Each target runs its own cycle (one job per weaken time):
 //   1. prepped targets get hack jobs first, best modelled $/s per thread slot first
+//   1b. share workers are topped up to --rep of all RAM (faction rep boost); this
+//      comes out of prep, not out of hacking income
 //   2. remaining RAM (minus a reservation, so busy hack targets find their RAM again)
 //      preps unprepped targets in score order: the best takes all it can use, the next
 //      the rest. Prep grow is delayed to land just after the first weaken, at min security.
 // Runs on a rooted server; never uses home RAM (reserved for agent one-shots).
-// args: [only target] to restrict to a single target (for experiments)
+// flags: --only <target> (experiments), --rep <fraction of RAM for share workers, default 0.25>
 /** @param {NS} ns */
 export async function main(ns) {
   ns.disableLog("ALL");
   const self = ns.getHostname();
   const slot = Math.max(ns.getScriptRam(H, "home"), ns.getScriptRam(G, "home"), ns.getScriptRam(W, "home"));
-  const only = ns.args[0] ? String(ns.args[0]) : "";
+  const shareRam = ns.getScriptRam(SHARE, "home");
+  // Not "--share": the RAM calculator would bill `flags.share` as ns.share() (2.4 GB).
+  const flags = ns.flags([["only", ""], ["rep", 0.25]]);
+  const only = String(flags.only);
+  const shareFraction = Number(flags.rep);
 
   // Take over from the old daemon's workers.
   for (const h of scanAll(ns).keys()) if (h !== "home") ns.scriptKill("w/hgw.js", h);
@@ -39,7 +45,7 @@ export async function main(ns) {
       openers = countOpeners(ns);
       for (const h of hosts) tryRoot(ns, h, openers);
       rooted = hosts.filter((h) => ns.hasRootAccess(h));
-      for (const h of rooted) if (h !== self && ns.getServerMaxRam(h) > 0) ns.scp([H, G, W], h, "home");
+      for (const h of rooted) if (h !== self && ns.getServerMaxRam(h) > 0) ns.scp([H, G, W, SHARE], h, "home");
     }
 
     const now = Date.now();
@@ -76,6 +82,17 @@ export async function main(ns) {
       else r.kind = "starved";
     }
 
+    // 1b. top up share workers, then refresh the slot view for prep
+    const totalRam = rooted.reduce((s, h) => s + ns.getServerMaxRam(h), 0);
+    const shareTarget = Math.floor((shareFraction * totalRam) / shareRam);
+    let shareThreads = rooted.reduce((s, h) => s + ns.ps(h).filter((p) => p.filename === SHARE).reduce((t, p) => t + p.threads, 0), 0);
+    for (const h of rooted) {
+      if (shareThreads >= shareTarget) break;
+      const n = Math.min(shareTarget - shareThreads, Math.floor((ns.getServerMaxRam(h) - ns.getServerUsedRam(h)) / shareRam));
+      if (n > 0 && ns.exec(SHARE, h, n)) shareThreads += n;
+    }
+    for (const f of free) f.n = Math.floor((ns.getServerMaxRam(f.h) - ns.getServerUsedRam(f.h)) / slot);
+
     // 2. prep in score order with what's left, minus the RAM busy hack targets will want back.
     // Conservative: reserves each busy hack job's full size, although part of it is still in use.
     const reserved = [...recs.values()].filter((r) => r.kind === "hack" && r.busyUntil > now).reduce((s, r) => s + r.threads, 0);
@@ -102,6 +119,7 @@ export async function main(ns) {
         money: ns.getServerMoneyAvailable("home"),
         openers,
         slots: { total: totalSlots, free: left(), reserved },
+        share: { threads: shareThreads, target: shareTarget, power: ns.getSharePower() },
         prepping,
         targets: targets.slice(0, 8).map(({ h, score }) => {
           const r = rec(h);
