@@ -1,86 +1,184 @@
 import { scanAll } from "lib/net.js";
-import { countOpeners, tryRoot, pickTarget } from "lib/targets.js";
+import { countOpeners, tryRoot } from "lib/targets.js";
 import { TARGET_PORT } from "w/hgw.js";
 
 const H = "w/h.js", G = "w/g.js", W = "w/w.js";
 const STATE = "data/state.txt";
 const HACK_SEC = 0.002, GROW_SEC = 0.004, WEAKEN_SEC = 0.05;
+const P_MAX = 0.25;          // max fraction stolen per cycle: small bites are cheaper per thread
+const P_SCORE = 0.1;         // fraction used to rank targets
+const PREP_MAX_MIN = 60;     // don't start preps estimated to take longer than this
+const PREP_SHARE = 0.6;      // max share of all slots one long prep may take
 
-// Coordinated controller, replaces bin/daemon.js + w/hgw.js.
-// One job per weaken-time cycle, all threads start together (no ms timing yet):
-//   prep:  weaken to min security, grow to max money (+ weaken for the grow)
-//   hack:  largest hack fraction p whose H/G/W thread counts fit free RAM,
-//          so the server ends each cycle back at min security / max money.
+// Multi-target controller. Each target runs its own cycle (one job per weaken time):
+//   1. prepped targets get hack jobs first, best modelled $/s per thread slot first
+//   2. targets whose whole prep fits in free RAM are prepped at once; then ONE long prep
+//      (best score with prep <= 60 min) gets at most 60% of all slots, minus a reservation
+//      so prepped targets find their RAM when their cycle restarts
 // Runs on a rooted server; never uses home RAM (reserved for agent one-shots).
-// args: [fixed target]
+// args: [only target] to restrict to a single target (for experiments)
 /** @param {NS} ns */
 export async function main(ns) {
   ns.disableLog("ALL");
   const self = ns.getHostname();
-  const ram = { [H]: ns.getScriptRam(H, "home"), [G]: ns.getScriptRam(G, "home"), [W]: ns.getScriptRam(W, "home") };
-  const slot = Math.max(ram[H], ram[G], ram[W]);
+  const slot = Math.max(ns.getScriptRam(H, "home"), ns.getScriptRam(G, "home"), ns.getScriptRam(W, "home"));
+  const only = ns.args[0] ? String(ns.args[0]) : "";
 
   // Take over from the old daemon's workers.
   for (const h of scanAll(ns).keys()) if (h !== "home") ns.scriptKill("w/hgw.js", h);
 
-  let target = "";
-  let cycle = 0;
-  while (true) {
-    const hosts = [...scanAll(ns).keys()].filter((h) => h !== "home");
-    const openers = countOpeners(ns);
-    for (const h of hosts) tryRoot(ns, h, openers);
-    const rooted = hosts.filter((h) => ns.hasRootAccess(h) && ns.getServerMaxRam(h) > 0);
-    for (const h of rooted) if (h !== self) ns.scp([H, G, W], h, "home");
+  /** @type {Map<string, {busyUntil: number, kind: string, threads: number, p: number}>} */
+  const recs = new Map();
+  /** @type {string[]} */
+  let rooted = [];
+  let openers = 0;
+  let prepping = "";
+  let nonce = 0;
 
-    const best = ns.args[0] ? String(ns.args[0]) : pickTarget(ns, rooted);
-    if (best && best !== target) {
-      target = best;
-      ns.clearPort(TARGET_PORT);
-      ns.writePort(TARGET_PORT, target);
-      ns.print(`target -> ${target}`);
+  for (let tick = 0; ; tick++) {
+    if (tick % 10 === 0) {
+      const hosts = [...scanAll(ns).keys()].filter((h) => h !== "home");
+      openers = countOpeners(ns);
+      for (const h of hosts) tryRoot(ns, h, openers);
+      rooted = hosts.filter((h) => ns.hasRootAccess(h));
+      for (const h of rooted) if (h !== self && ns.getServerMaxRam(h) > 0) ns.scp([H, G, W], h, "home");
     }
 
+    const now = Date.now();
+    const lvl = ns.getHackingLevel();
     const free = rooted.map((h) => ({ h, n: Math.floor((ns.getServerMaxRam(h) - ns.getServerUsedRam(h)) / slot) }));
-    const capacity = free.reduce((s, f) => s + f.n, 0);
-    const job = plan(ns, target, capacity);
-    const nonce = cycle++;
-    const launched = { h: run(ns, free, H, job.h, target, nonce), g: run(ns, free, G, job.g, target, nonce), w: run(ns, free, W, job.w, target, nonce) };
-    const wait = ns.getWeakenTime(target) + 200;
+    const totalSlots = rooted.reduce((s, h) => s + Math.floor(ns.getServerMaxRam(h) / slot), 0);
+    const left = () => free.reduce((s, f) => s + f.n, 0);
 
-    ns.print(`${job.kind} ${target}: h=${launched.h} g=${launched.g} w=${launched.w} p=${job.p.toFixed(3)} of ${capacity} slots, ${(wait / 1000).toFixed(0)}s`);
-    const state = {
-      time: Date.now(),
-      hacking: ns.getHackingLevel(),
-      money: ns.getServerMoneyAvailable("home"),
-      openers,
-      target,
-      job: { ...job, launched, capacity, waitMs: wait },
-      rooted: rooted.map((h) => ({ host: h, ram: ns.getServerMaxRam(h), used: ns.getServerUsedRam(h) })),
+    const targets = rooted
+      .filter((h) => (!only || h === only) && ns.getServerMaxMoney(h) > 0 && ns.getServerRequiredHackingLevel(h) <= lvl)
+      .map((h) => ({ h, score: score(ns, h, lvl) }))
+      .sort((a, b) => b.score - a.score);
+    const rec = (/** @type {string} */ h) => {
+      if (!recs.has(h)) recs.set(h, { busyUntil: 0, kind: "new", threads: 0, p: 0 });
+      return /** @type {{busyUntil: number, kind: string, threads: number, p: number}} */ (recs.get(h));
     };
-    ns.write(STATE, JSON.stringify(state), "w");
-    if (self !== "home") ns.scp(STATE, "home", self);
+    const launch = (/** @type {string} */ h, /** @type {{kind: string, p: number, h: number, g: number, w: number}} */ job) => {
+      const id = nonce++;
+      const n = run(ns, free, H, job.h, h, id) + run(ns, free, G, job.g, h, id) + run(ns, free, W, job.w, h, id);
+      Object.assign(rec(h), { busyUntil: now + ns.getWeakenTime(h) + 300, kind: job.kind, threads: n, p: job.p });
+      ns.print(`${job.kind} ${h}: h=${job.h} g=${job.g} w=${job.w} p=${job.p.toFixed(3)}`);
+    };
 
-    await ns.sleep(wait);
+    // 1. hack jobs on prepped targets
+    for (const { h } of targets) {
+      const r = rec(h);
+      if (r.busyUntil > now || !isPrepped(ns, h)) continue;
+      if (prepping === h) prepping = "";
+      const job = planHack(ns, h, left());
+      if (job.h > 0) launch(h, job);
+      else r.kind = "starved";
+    }
+
+    // 2. prep with what's left, minus the RAM busy hack targets will want back
+    const reserved = [...recs.values()].filter((r) => r.kind === "hack" && r.busyUntil > now).reduce((s, r) => s + r.threads, 0);
+
+    // 2a. cheap preps (whole prep fits now) start immediately, any number of them
+    for (const { h } of targets) {
+      if (rec(h).busyUntil > now || isPrepped(ns, h)) continue;
+      const job = planPrep(ns, h, Infinity);
+      if (job.g + job.w > 0 && job.g + job.w <= left() - reserved) launch(h, job);
+    }
+
+    // 2b. one long prep at a time, capped so newly prepped targets still find RAM
+    if (!prepping || isPrepped(ns, prepping) || !targets.some((t) => t.h === prepping)) {
+      prepping = "";
+      const cap = Math.max(1, totalSlots - reserved);
+      for (const { h } of targets) {
+        if (isPrepped(ns, h) || prepMinutes(ns, h, cap) > PREP_MAX_MIN) continue;
+        prepping = h;
+        break;
+      }
+    }
+    if (prepping && rec(prepping).busyUntil <= now) {
+      // Conservative: reserve each busy hack job's full size, although part of it is still in use.
+      const job = planPrep(ns, prepping, Math.max(0, Math.min(left() - reserved, Math.floor(totalSlots * PREP_SHARE))));
+      if (job.g + job.w > 0) launch(prepping, job);
+    }
+
+    // Metrics sampler follows the best prepped target.
+    const top = targets.find((t) => rec(t.h).kind === "hack")?.h ?? targets[0]?.h ?? "";
+    if (top && String(ns.peek(TARGET_PORT)) !== top) {
+      ns.clearPort(TARGET_PORT);
+      ns.writePort(TARGET_PORT, top);
+    }
+
+    if (tick % 5 === 0) {
+      const state = {
+        time: now,
+        hacking: lvl,
+        money: ns.getServerMoneyAvailable("home"),
+        openers,
+        slots: { total: totalSlots, free: left(), reserved },
+        prepping,
+        targets: targets.slice(0, 8).map(({ h, score }) => {
+          const r = rec(h);
+          return { h, score: Math.round(score), kind: r.kind, p: r.p, threads: r.threads, inSec: Math.max(0, Math.round((r.busyUntil - now) / 1000)) };
+        }),
+      };
+      ns.write(STATE, JSON.stringify(state), "w");
+      if (self !== "home") ns.scp(STATE, "home", self);
+    }
+
+    await ns.sleep(1000);
   }
 }
 
-/**
- * Thread counts for one cycle against target, within capacity thread slots.
- * @param {NS} ns @param {string} t @param {number} capacity
- */
-function plan(ns, t, capacity) {
+/** @param {NS} ns @param {string} t */
+function isPrepped(ns, t) {
+  return ns.getServerSecurityLevel(t) <= ns.getServerMinSecurityLevel(t) + 0.5
+    && ns.getServerMoneyAvailable(t) >= ns.getServerMaxMoney(t) * 0.99;
+}
+
+// Grow threads for a money multiplier (game formula, from memory: rate capped at 1.0035).
+/** @param {number} mult @param {number} sec @param {number} growth */
+function growThreads(mult, sec, growth) {
+  return Math.log(mult) / Math.log(Math.min(1.0035, 1 + 0.03 / sec)) / (growth / 100);
+}
+
+// Modelled steady-state $/s per thread slot at min security, hacking P_SCORE per cycle.
+/** @param {NS} ns @param {string} t @param {number} lvl */
+function score(ns, t, lvl) {
+  const req = ns.getServerRequiredHackingLevel(t), sec = ns.getServerMinSecurityLevel(t);
+  const max = ns.getServerMaxMoney(t), growth = ns.getServerGrowth(t);
+  const chance = Math.min(1, Math.max(0, ((1.75 * lvl - req) / (1.75 * lvl)) * ((100 - sec) / 100)));
+  const pct = ((100 - sec) / 100) * ((lvl - (req - 1)) / lvl) / 240;
+  if (pct <= 0 || chance <= 0) return 0;
+  const tw = (4 * 5 * (2.5 * req * sec + 500)) / (lvl + 50);
+  const h = P_SCORE / pct, g = growThreads(1 / (1 - P_SCORE), sec, growth) * 1.05;
+  const w = (h * HACK_SEC + g * GROW_SEC) / WEAKEN_SEC;
+  return (P_SCORE * max * chance) / tw / (h + g + w);
+}
+
+// Estimated minutes to prep t using cap thread slots per weaken cycle.
+/** @param {NS} ns @param {string} t @param {number} cap */
+function prepMinutes(ns, t, cap) {
+  const sec = ns.getServerSecurityLevel(t), min = ns.getServerMinSecurityLevel(t);
+  const money = Math.max(1, ns.getServerMoneyAvailable(t)), max = ns.getServerMaxMoney(t);
+  const g = growThreads(max / money, min + 2, ns.getServerGrowth(t));
+  const threads = g * (1 + GROW_SEC / WEAKEN_SEC) + (sec - min) / WEAKEN_SEC;
+  return (Math.ceil(threads / cap) * ns.getWeakenTime(t)) / 60000;
+}
+
+/** @param {NS} ns @param {string} t @param {number} capacity */
+function planPrep(ns, t, capacity) {
   const sec = ns.getServerSecurityLevel(t), min = ns.getServerMinSecurityLevel(t);
   const money = ns.getServerMoneyAvailable(t), max = ns.getServerMaxMoney(t);
+  const w1 = Math.min(capacity, Math.ceil((sec - min) / WEAKEN_SEC));
+  let g = money < max ? Math.ceil(ns.growthAnalyze(t, max / Math.max(money, 1))) : 0;
+  g = Math.max(0, Math.min(g, Math.floor((capacity - w1) / (1 + GROW_SEC / WEAKEN_SEC))));
+  const w2 = Math.ceil((g * GROW_SEC) / WEAKEN_SEC);
+  return { kind: "prep", p: 0, h: 0, g, w: w1 + w2 };
+}
 
-  if (sec > min + 0.5 || money < max * 0.99) {
-    const w1 = Math.min(capacity, Math.ceil((sec - min) / WEAKEN_SEC));
-    let g = money < max ? Math.ceil(ns.growthAnalyze(t, max / Math.max(money, 1))) : 0;
-    g = Math.min(g, Math.floor((capacity - w1) / (1 + GROW_SEC / WEAKEN_SEC)));
-    const w2 = Math.ceil((g * GROW_SEC) / WEAKEN_SEC);
-    return { kind: "prep", p: 0, h: 0, g, w: w1 + w2 };
-  }
-
-  // At min sec / max money: binary search the largest hack thread count that fits.
+// Largest hack (p <= P_MAX) whose H/G/W threads fit capacity. Target must be prepped.
+/** @param {NS} ns @param {string} t @param {number} capacity */
+function planHack(ns, t, capacity) {
   const perThread = ns.hackAnalyze(t);
   const cost = (/** @type {number} */ h) => {
     const p = Math.min(h * perThread, 0.95);
@@ -88,13 +186,13 @@ function plan(ns, t, capacity) {
     const w = Math.ceil((h * HACK_SEC + g * GROW_SEC) / WEAKEN_SEC) + 1;
     return { kind: "hack", p, h, g, w };
   };
-  let lo = 0, hi = Math.max(1, Math.floor(0.95 / perThread));
+  let lo = 0, hi = Math.max(1, Math.floor(P_MAX / perThread));
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
     const c = cost(mid);
     if (c.h + c.g + c.w <= capacity) lo = mid; else hi = mid - 1;
   }
-  return lo > 0 ? cost(lo) : { kind: "idle", p: 0, h: 0, g: 0, w: 0 };
+  return lo > 0 ? cost(lo) : { kind: "hack", p: 0, h: 0, g: 0, w: 0 };
 }
 
 /**
