@@ -61,6 +61,17 @@ export async function main(ns) {
       stateOf(t).flights.push({ until, g: isGrow ? p.threads : 0, w1: isWeaken ? p.threads : 0, w1Lands: until });
     }
   }
+  // Targets already at max money were being hacked: keep them in hack mode, busy until the adopted
+  // jobs end, instead of losing a whole cycle of income per restart.
+  for (const [t, r] of targetStates) {
+    if (ns.getServerMoneyAvailable(t) < ns.getServerMaxMoney(t) * 0.99) continue;
+    Object.assign(r, {
+      mode: "hack",
+      busyUntil: Math.max(...r.flights.map((f) => f.until)),
+      threads: r.flights.reduce((s, f) => s + f.g + f.w1, 0),
+      flights: [],
+    });
+  }
 
   /** @type {string[]} */
   let rooted = [];
