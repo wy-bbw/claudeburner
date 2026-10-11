@@ -4,7 +4,7 @@ Experiment: playing Bitburner (Steam) with Claude writing all the scripts. Fresh
 
 ## Goal
 Fastest progress by **real time**. Start on easy targets, move to harder ones when they pay more net of prep time;
-prep the next target in parallel. Verify every model/claim with the metrics sampler (`bin/metrics.js` + `bridge/report.mjs`,
+prep the next target in parallel. Verify every model/claim with the metrics sampler (`services/metrics.js` + `bridge/report.mjs`,
 baseline vs change, marks in `marks.txt`) — formulas from memory have been wrong before.
 Lesson: every server starts at 4% of max money; low-growth targets need hours of prep (sigma-cosmetics ~5 h), n00dles ~1 min.
 
@@ -21,4 +21,12 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 - Home is tiny early on: keep only `agent.js` there, run heavy scripts on rooted servers via `-h`.
 - Call port openers explicitly; dynamic `ns[fn]` breaks the RAM calculator.
 - The RAM calculator bills any `.name` that matches an ns function (`flags.share` cost 2.4 GB as ns.share). Avoid such property names; check `cli ram` after edits.
-- `data/state.txt` on home is the daemon's JSON snapshot; `bin/state.js` is a heavier full dump (4.7 GB).
+- `data/state.txt` on home is the controller's JSON snapshot; `tools/state.js` is a heavier full dump (4.7 GB).
+
+## Layout (`src/`, synced to home)
+- `agent.js` — top level because the user types `run agent.js` after each reset.
+- `lib/` shared code · `workers/` single-operation jobs (hack, grow, weaken, share), started only by the controller ·
+  `services/` long-running (`controller.js` on a rooted server, `metrics.js` on n00dles) · `tools/` one-shots
+  (`root`, `path` for backdoor connect chains, `kill`, `state`, `check-grow`).
+- Start the controller: `node bridge/cli.mjs run services/controller.js -h harakiri-sushi --rep <share fraction>`.
+- Use meaningful names (user rule, see ~/.claude/CLAUDE.md).

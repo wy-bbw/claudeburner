@@ -1,8 +1,11 @@
 import { scanAll } from "lib/net.js";
 import { countOpeners, tryRoot } from "lib/targets.js";
-import { TARGET_PORT } from "w/hgw.js";
+import { TARGET_PORT } from "lib/ports.js";
 
-const H = "w/h.js", G = "w/g.js", W = "w/w.js", SHARE = "w/share.js";
+const HACK_WORKER = "workers/hack.js", GROW_WORKER = "workers/grow.js", WEAKEN_WORKER = "workers/weaken.js";
+const SHARE_WORKER = "workers/share.js";
+// Pre-rename worker paths; their running jobs are still adopted (and old share workers stopped).
+const LEGACY_GROW = "w/g.js", LEGACY_WEAKEN = "w/w.js", LEGACY_SHARE = "w/share.js";
 const STATE = "data/state.txt";
 const HACK_SEC = 0.002, GROW_SEC = 0.004, WEAKEN_SEC = 0.05;
 const P_MAX = 0.25;          // max fraction stolen per cycle: small bites are cheaper per thread
@@ -12,8 +15,8 @@ const HACK_KEEP_MONEY = 0.5; // a hack-mode target stays in hack mode above this
 const HACK_KEEP_SEC = 5;     // ...and below min security + this
 
 /** @typedef {{kind: string, p: number, h: number, g: number, w1: number, w2: number}} Job */
-/** @typedef {{until: number, g: number, w1: number, w1Lands: number}} Flight */
-/** @typedef {{mode: string, busyUntil: number, threads: number, p: number, flights: Flight[]}} Rec */
+/** @typedef {{until: number, g: number, w1: number, w1Lands: number}} PrepInFlight */
+/** @typedef {{mode: string, busyUntil: number, threads: number, p: number, flights: PrepInFlight[], jobH: number, jobG: number, hEnd: number, gEnd: number}} TargetState */
 
 // Multi-target controller.
 //   Targets are in "prep" mode until min security / max money, then in "hack" mode, where
@@ -29,30 +32,31 @@ const HACK_KEEP_SEC = 5;     // ...and below min security + this
 export async function main(ns) {
   ns.disableLog("ALL");
   const self = ns.getHostname();
-  const slot = Math.max(ns.getScriptRam(H, "home"), ns.getScriptRam(G, "home"), ns.getScriptRam(W, "home"));
-  const shareRam = ns.getScriptRam(SHARE, "home");
+  const slot = Math.max(ns.getScriptRam(HACK_WORKER, "home"), ns.getScriptRam(GROW_WORKER, "home"), ns.getScriptRam(WEAKEN_WORKER, "home"));
+  const shareRam = ns.getScriptRam(SHARE_WORKER, "home");
   // Not "--share": the RAM calculator would bill `flags.share` as ns.share() (2.4 GB).
   const flags = ns.flags([["only", ""], ["rep", 0.25]]);
   const only = String(flags.only);
   const shareFraction = Number(flags.rep);
 
-  // Take over from the old daemon's workers.
-  for (const h of scanAll(ns).keys()) if (h !== "home") ns.scriptKill("w/hgw.js", h);
+  for (const h of scanAll(ns).keys()) if (h !== "home") ns.scriptKill(LEGACY_SHARE, h);
 
-  /** @type {Map<string, Rec>} */
-  const recs = new Map();
-  const rec = (/** @type {string} */ h) => {
-    if (!recs.has(h)) recs.set(h, { mode: "prep", busyUntil: 0, threads: 0, p: 0, flights: [] });
-    return /** @type {Rec} */ (recs.get(h));
+  /** @type {Map<string, TargetState>} */
+  const targetStates = new Map();
+  const stateOf = (/** @type {string} */ h) => {
+    if (!targetStates.has(h)) targetStates.set(h, { mode: "prep", busyUntil: 0, threads: 0, p: 0, flights: [], jobH: 0, jobG: 0, hEnd: 0, gEnd: 0 });
+    return /** @type {TargetState} */ (targetStates.get(h));
   };
   // Adopt jobs still running from a previous controller as prep flights (upper-bound timing),
   // so a restart doesn't launch them twice.
   for (const host of scanAll(ns).keys()) {
     for (const p of ns.ps(host)) {
-      if (p.filename !== G && p.filename !== W) continue;
+      const isGrow = p.filename === GROW_WORKER || p.filename === LEGACY_GROW;
+      const isWeaken = p.filename === WEAKEN_WORKER || p.filename === LEGACY_WEAKEN;
+      if (!isGrow && !isWeaken) continue;
       const t = String(p.args[0]);
       const until = Date.now() + ns.getWeakenTime(t) + 500;
-      rec(t).flights.push({ until, g: p.filename === G ? p.threads : 0, w1: p.filename === W ? p.threads : 0, w1Lands: until });
+      stateOf(t).flights.push({ until, g: isGrow ? p.threads : 0, w1: isWeaken ? p.threads : 0, w1Lands: until });
     }
   }
 
@@ -68,7 +72,7 @@ export async function main(ns) {
       openers = countOpeners(ns);
       for (const h of hosts) tryRoot(ns, h, openers);
       rooted = hosts.filter((h) => ns.hasRootAccess(h));
-      for (const h of rooted) if (h !== self && ns.getServerMaxRam(h) > 0) ns.scp([H, G, W, SHARE], h, "home");
+      for (const h of rooted) if (h !== self && ns.getServerMaxRam(h) > 0) ns.scp([HACK_WORKER, GROW_WORKER, WEAKEN_WORKER, SHARE_WORKER], h, "home");
     }
 
     const now = Date.now();
@@ -83,7 +87,7 @@ export async function main(ns) {
       .sort((a, b) => b.score - a.score);
 
     for (const { h } of targets) {
-      const r = rec(h);
+      const r = stateOf(h);
       r.flights = r.flights.filter((f) => f.until > now);
       const money = ns.getServerMoneyAvailable(h) / ns.getServerMaxMoney(h);
       const secOver = ns.getServerSecurityLevel(h) - ns.getServerMinSecurityLevel(h);
@@ -93,28 +97,29 @@ export async function main(ns) {
 
     /** @param {string} h @param {Job} job */
     const launch = (h, job) => {
-      const r = rec(h), id = nonce++;
+      const r = stateOf(h), id = nonce++;
       const tw = ns.getWeakenTime(h), tg = ns.getGrowTime(h);
       let n;
       if (job.kind === "prep") {
         // Grow lands 100 ms after the last weaken already in flight (or this job's own w1), at min security.
         const w1Lands = Math.max(job.w1 > 0 ? now + tw : 0, ...r.flights.map((f) => f.w1Lands), now);
         const growLands = Math.max(w1Lands, now + tg) + 100;
-        const w1 = run(ns, free, W, job.w1, h, id, 0);
-        const g = run(ns, free, G, job.g, h, id, growLands - now - tg);
-        const w2 = run(ns, free, W, job.w2, h, id, Math.max(0, growLands + 100 - now - tw));
+        const w1 = run(ns, free, WEAKEN_WORKER, job.w1, h, id, 0);
+        const g = run(ns, free, GROW_WORKER, job.g, h, id, growLands - now - tg);
+        const w2 = run(ns, free, WEAKEN_WORKER, job.w2, h, id, Math.max(0, growLands + 100 - now - tw));
         r.flights.push({ until: Math.max(now + tw, growLands + 100) + 300, g, w1, w1Lands: job.w1 > 0 ? now + tw : 0 });
         n = w1 + g + w2;
       } else {
-        n = run(ns, free, H, job.h, h, id, 0) + run(ns, free, G, job.g, h, id, 0) + run(ns, free, W, job.w1, h, id, 0);
-        Object.assign(r, { busyUntil: now + tw + 500, threads: n, p: job.p });
+        const jobH = run(ns, free, HACK_WORKER, job.h, h, id, 0), jobG = run(ns, free, GROW_WORKER, job.g, h, id, 0);
+        n = jobH + jobG + run(ns, free, WEAKEN_WORKER, job.w1, h, id, 0);
+        Object.assign(r, { busyUntil: now + tw + 500, threads: n, p: job.p, jobH, jobG, hEnd: now + ns.getHackTime(h), gEnd: now + tg });
       }
       ns.print(`${job.kind} ${h}: h=${job.h} g=${job.g} w=${job.w1}+${job.w2} p=${job.p.toFixed(3)} started=${n}`);
     };
 
     // 1. hack-mode targets
     for (const { h } of targets) {
-      const r = rec(h);
+      const r = stateOf(h);
       if (r.mode !== "hack" || r.busyUntil > now) continue;
       const job = planHack(ns, h, left());
       if (job.h + job.g + job.w1 > 0) launch(h, job);
@@ -123,43 +128,44 @@ export async function main(ns) {
     // 1b. top up share workers, then refresh the slot view for prep
     const totalRam = rooted.reduce((s, h) => s + ns.getServerMaxRam(h), 0);
     const shareTarget = Math.floor((shareFraction * totalRam) / shareRam);
-    let shareThreads = rooted.reduce((s, h) => s + ns.ps(h).filter((p) => p.filename === SHARE).reduce((t, p) => t + p.threads, 0), 0);
+    let shareThreads = rooted.reduce((s, h) => s + ns.ps(h).filter((p) => p.filename === SHARE_WORKER).reduce((t, p) => t + p.threads, 0), 0);
     for (const h of rooted) { // over target (fraction lowered): stop whole hosts' share workers
       if (shareThreads <= shareTarget) break;
-      const n = ns.ps(h).filter((p) => p.filename === SHARE).reduce((t, p) => t + p.threads, 0);
-      if (n > 0 && ns.scriptKill(SHARE, h)) shareThreads -= n;
+      const n = ns.ps(h).filter((p) => p.filename === SHARE_WORKER).reduce((t, p) => t + p.threads, 0);
+      if (n > 0 && ns.scriptKill(SHARE_WORKER, h)) shareThreads -= n;
     }
     for (const h of rooted) {
       if (shareThreads >= shareTarget) break;
       const n = Math.min(shareTarget - shareThreads, Math.floor((ns.getServerMaxRam(h) - ns.getServerUsedRam(h)) / shareRam));
-      if (n > 0 && ns.exec(SHARE, h, n)) shareThreads += n;
+      if (n > 0 && ns.exec(SHARE_WORKER, h, n)) shareThreads += n;
     }
     for (const f of free) f.n = Math.floor((ns.getServerMaxRam(f.h) - ns.getServerUsedRam(f.h)) / slot);
 
     // 2. prep-mode targets in score order, minus the RAM busy hack targets will want back.
     // Conservative: reserves each busy hack job's full size, although part of it is still in use.
     // Idle hack targets (waiting for RAM) reserve their next job's size too, or prep starves them.
-    const reserved = targets.filter(({ h }) => rec(h).mode === "hack").reduce((s, { h }) => {
-      const r = rec(h);
-      if (r.busyUntil > now) return s + r.threads;
+    const reserved = targets.filter(({ h }) => stateOf(h).mode === "hack").reduce((s, { h }) => {
+      const r = stateOf(h);
+      // Busy: reserve only what its finished hack/grow threads freed (the rest is still in use).
+      if (r.busyUntil > now) return s + (now >= r.hEnd ? r.jobH : 0) + (now >= r.gEnd ? r.jobG : 0);
       const job = planHack(ns, h, totalSlots);
       return s + job.h + job.g + job.w1;
     }, 0);
     const cap = Math.max(1, totalSlots - reserved);
     // Sticky focus: scores shift with level, so without it RAM hops between half-prepped targets.
     // New focus = best score per remaining prep cycle (a nearly done target beats a better empty one).
-    const preps = targets.filter(({ h }) => rec(h).mode === "prep" && prepMinutes(ns, h, cap) <= PREP_MAX_MIN)
-      .map(({ h, score }) => ({ h, prio: score / (1 + prepThreads(ns, h, rec(h).flights) / cap) }))
+    const preps = targets.filter(({ h }) => stateOf(h).mode === "prep" && prepMinutes(ns, h, cap) <= PREP_MAX_MIN)
+      .map(({ h, score }) => ({ h, prio: score / (1 + prepThreads(ns, h, stateOf(h).flights) / cap) }))
       .sort((a, b) => b.prio - a.prio);
     if (!preps.some((p) => p.h === focus)) focus = preps[0]?.h ?? "";
     for (const { h } of [...preps.filter((p) => p.h === focus), ...preps.filter((p) => p.h !== focus)]) {
       if (left() - reserved <= 0) break;
-      const job = planPrep(ns, h, left() - reserved, rec(h).flights);
+      const job = planPrep(ns, h, left() - reserved, stateOf(h).flights);
       if (job.g + job.w1 + job.w2 > 0) launch(h, job);
     }
 
     // Metrics sampler follows the best hack-mode target.
-    const top = targets.find((t) => rec(t.h).mode === "hack")?.h ?? targets[0]?.h ?? "";
+    const top = targets.find((t) => stateOf(t.h).mode === "hack")?.h ?? targets[0]?.h ?? "";
     if (top && String(ns.peek(TARGET_PORT)) !== top) {
       ns.clearPort(TARGET_PORT);
       ns.writePort(TARGET_PORT, top);
@@ -175,7 +181,7 @@ export async function main(ns) {
         focus,
         share: { threads: shareThreads, target: shareTarget, power: ns.getSharePower() },
         targets: targets.slice(0, 12).map(({ h, score }) => {
-          const r = rec(h);
+          const r = stateOf(h);
           return {
             h,
             score: Math.round(score),
@@ -236,14 +242,14 @@ function prepMinutes(ns, t, cap) {
 }
 
 // Total prep threads still needed beyond what's in flight.
-/** @param {NS} ns @param {string} t @param {Flight[]} flights */
+/** @param {NS} ns @param {string} t @param {PrepInFlight[]} flights */
 function prepThreads(ns, t, flights) {
   const job = planPrep(ns, t, Infinity, flights);
   return job.g + job.w1 + job.w2;
 }
 
 // Prep threads still needed beyond what's in flight, within capacity.
-/** @param {NS} ns @param {string} t @param {number} capacity @param {Flight[]} flights @returns {Job} */
+/** @param {NS} ns @param {string} t @param {number} capacity @param {PrepInFlight[]} flights @returns {Job} */
 function planPrep(ns, t, capacity, flights) {
   const secOver = ns.getServerSecurityLevel(t) - ns.getServerMinSecurityLevel(t);
   const w1 = Math.max(0, Math.min(capacity, Math.ceil(secOver / WEAKEN_SEC) - flights.reduce((s, f) => s + f.w1, 0)));

@@ -1,4 +1,4 @@
-import { TARGET_PORT } from "w/hgw.js";
+import { TARGET_PORT } from "lib/ports.js";
 
 const OUT = "data/metrics.txt";
 
