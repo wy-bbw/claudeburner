@@ -14,9 +14,13 @@ const PREP_MAX_MIN = 60;     // don't start preps estimated to take longer than 
 const HACK_KEEP_MONEY = 0.5; // a hack-mode target stays in hack mode above this money fraction...
 const HACK_KEEP_SEC = 5;     // ...and below min security + this
 
-/** @typedef {{kind: string, p: number, h: number, g: number, w1: number, w2: number}} Job */
+/** Target lifecycle: prep until min security / max money, then hack. Also the kind of a job. */
+const Mode = Object.freeze({ PREP: "prep", HACK: "hack" });
+/** @typedef {typeof Mode[keyof typeof Mode]} ModeName */
+
+/** @typedef {{kind: ModeName, p: number, h: number, g: number, w1: number, w2: number}} Job */
 /** @typedef {{until: number, g: number, w1: number, w1Lands: number}} PrepInFlight */
-/** @typedef {{mode: string, busyUntil: number, threads: number, p: number, flights: PrepInFlight[], jobH: number, jobG: number, hEnd: number, gEnd: number}} TargetState */
+/** @typedef {{mode: ModeName, busyUntil: number, threads: number, p: number, flights: PrepInFlight[], jobH: number, jobG: number, hEnd: number, gEnd: number}} TargetState */
 
 // Multi-target controller.
 //   Targets are in "prep" mode until min security / max money, then in "hack" mode, where
@@ -46,7 +50,7 @@ export async function main(ns) {
   /** @type {Map<string, TargetState>} */
   const targetStates = new Map();
   const stateOf = (/** @type {string} */ h) => {
-    if (!targetStates.has(h)) targetStates.set(h, { mode: "prep", busyUntil: 0, threads: 0, p: 0, flights: [], jobH: 0, jobG: 0, hEnd: 0, gEnd: 0 });
+    if (!targetStates.has(h)) targetStates.set(h, { mode: Mode.PREP, busyUntil: 0, threads: 0, p: 0, flights: [], jobH: 0, jobG: 0, hEnd: 0, gEnd: 0 });
     return /** @type {TargetState} */ (targetStates.get(h));
   };
   // Adopt jobs still running from a previous controller as prep flights (upper-bound timing),
@@ -66,7 +70,7 @@ export async function main(ns) {
   for (const [t, r] of targetStates) {
     if (ns.getServerMoneyAvailable(t) < ns.getServerMaxMoney(t) * 0.99) continue;
     Object.assign(r, {
-      mode: "hack",
+      mode: Mode.HACK,
       busyUntil: Math.max(...r.flights.map((f) => f.until)),
       threads: r.flights.reduce((s, f) => s + f.g + f.w1, 0),
       flights: [],
@@ -108,8 +112,8 @@ export async function main(ns) {
       r.flights = r.flights.filter((f) => f.until > now);
       const money = ns.getServerMoneyAvailable(h) / ns.getServerMaxMoney(h);
       const secOver = ns.getServerSecurityLevel(h) - ns.getServerMinSecurityLevel(h);
-      if (r.mode === "hack" && (money < HACK_KEEP_MONEY || secOver > HACK_KEEP_SEC)) r.mode = "prep";
-      else if (r.mode === "prep" && r.flights.length === 0 && money >= 0.99 && secOver <= 0.5) r.mode = "hack";
+      if (r.mode === Mode.HACK && (money < HACK_KEEP_MONEY || secOver > HACK_KEEP_SEC)) r.mode = Mode.PREP;
+      else if (r.mode === Mode.PREP && r.flights.length === 0 && money >= 0.99 && secOver <= 0.5) r.mode = Mode.HACK;
     }
 
     /** @param {string} h @param {Job} job */
@@ -117,7 +121,7 @@ export async function main(ns) {
       const r = stateOf(h), id = nonce++;
       const tw = ns.getWeakenTime(h), tg = ns.getGrowTime(h);
       let n;
-      if (job.kind === "prep") {
+      if (job.kind === Mode.PREP) {
         // Grow lands 100 ms after the last weaken already in flight (or this job's own w1), at min security.
         const w1Lands = Math.max(job.w1 > 0 ? now + tw : 0, ...r.flights.map((f) => f.w1Lands), now);
         const growLands = Math.max(w1Lands, now + tg) + 100;
@@ -137,7 +141,7 @@ export async function main(ns) {
     // 1. hack-mode targets
     for (const { h } of targets) {
       const r = stateOf(h);
-      if (r.mode !== "hack" || r.busyUntil > now) continue;
+      if (r.mode !== Mode.HACK || r.busyUntil > now) continue;
       const job = planHack(ns, h, left());
       if (job.h + job.g + job.w1 > 0) launch(h, job);
     }
@@ -161,7 +165,7 @@ export async function main(ns) {
     // 2. prep-mode targets in score order, minus the RAM busy hack targets will want back.
     // Conservative: reserves each busy hack job's full size, although part of it is still in use.
     // Idle hack targets (waiting for RAM) reserve their next job's size too, or prep starves them.
-    const reserved = targets.filter(({ h }) => stateOf(h).mode === "hack").reduce((s, { h }) => {
+    const reserved = targets.filter(({ h }) => stateOf(h).mode === Mode.HACK).reduce((s, { h }) => {
       const r = stateOf(h);
       // Busy: reserve only what its finished hack/grow threads freed (the rest is still in use).
       if (r.busyUntil > now) return s + (now >= r.hEnd ? r.jobH : 0) + (now >= r.gEnd ? r.jobG : 0);
@@ -171,7 +175,7 @@ export async function main(ns) {
     const cap = Math.max(1, totalSlots - reserved);
     // Sticky focus: scores shift with level, so without it RAM hops between half-prepped targets.
     // New focus = best score per remaining prep cycle (a nearly done target beats a better empty one).
-    const preps = targets.filter(({ h }) => stateOf(h).mode === "prep" && prepMinutes(ns, h, cap) <= PREP_MAX_MIN)
+    const preps = targets.filter(({ h }) => stateOf(h).mode === Mode.PREP && prepMinutes(ns, h, cap) <= PREP_MAX_MIN)
       .map(({ h, score }) => ({ h, prio: score / (1 + prepThreads(ns, h, stateOf(h).flights) / cap) }))
       .sort((a, b) => b.prio - a.prio);
     if (!preps.some((p) => p.h === focus)) focus = preps[0]?.h ?? "";
@@ -182,7 +186,7 @@ export async function main(ns) {
     }
 
     // Metrics sampler follows the best hack-mode target.
-    const top = targets.find((t) => stateOf(t.h).mode === "hack")?.h ?? targets[0]?.h ?? "";
+    const top = targets.find((t) => stateOf(t.h).mode === Mode.HACK)?.h ?? targets[0]?.h ?? "";
     if (top && String(ns.peek(TARGET_PORT)) !== top) {
       ns.clearPort(TARGET_PORT);
       ns.writePort(TARGET_PORT, top);
@@ -273,7 +277,7 @@ function planPrep(ns, t, capacity, flights) {
   const gNeed = growToMax(ns, t, ns.getServerMoneyAvailable(t)) - flights.reduce((s, f) => s + f.g, 0);
   const g = Math.max(0, Math.min(gNeed, Math.floor((capacity - w1) / (1 + GROW_SEC / WEAKEN_SEC))));
   const w2 = Math.ceil((g * GROW_SEC) / WEAKEN_SEC);
-  return { kind: "prep", p: 0, h: 0, g, w1, w2 };
+  return { kind: Mode.PREP, p: 0, h: 0, g, w1, w2 };
 }
 
 // Largest hack (p <= P_MAX) whose threads fit capacity; grow and weaken also repair any
@@ -287,7 +291,7 @@ function planHack(ns, t, capacity) {
     const p = Math.min(h * perThread, 0.95);
     const g = Math.ceil(growToMax(ns, t, money * (1 - p)) * 1.05); // margin: grow lands at raised security
     const w = Math.ceil(secOver / WEAKEN_SEC + (h * HACK_SEC + g * GROW_SEC) / WEAKEN_SEC) + 1;
-    return { kind: "hack", p, h, g, w1: w, w2: 0 };
+    return { kind: Mode.HACK, p, h, g, w1: w, w2: 0 };
   };
   let lo = 0, hi = Math.max(1, Math.floor(P_MAX / perThread));
   while (lo < hi) {
