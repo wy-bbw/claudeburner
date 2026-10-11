@@ -11,7 +11,12 @@ const STATE_FILE = "data/state.txt";
 // Security change per thread (game constants).
 const SECURITY_PER_HACK_THREAD = 0.002, SECURITY_PER_GROW_THREAD = 0.004, SECURITY_PER_WEAKEN_THREAD = 0.05;
 
-const MAX_HACK_FRACTION = 0.25;     // max share of a target's money stolen per cycle: small bites are cheaper per thread
+// Hack fraction per cycle: up to 25% always (small bites are cheapest per thread); up to 75% while
+// the job fits in 15% of all thread slots, so with plenty of RAM each target pays out more per cycle
+// (regrowing 75% costs ~1.6x the grow threads per dollar of 25%) without starving the rest.
+const ALWAYS_ALLOWED_HACK_FRACTION = 0.25;
+const MAX_HACK_FRACTION = 0.75;
+const MAX_HACK_JOB_SHARE_OF_THREADS = 0.15;
 const SCORING_HACK_FRACTION = 0.1;  // hack fraction assumed when ranking targets
 const MAX_PREP_MINUTES = 60;        // don't start preps estimated to take longer than this
 // A target in hack mode stays there while money and security are within these bounds...
@@ -171,7 +176,7 @@ export async function main(ns) {
     for (const { target } of targets) {
       const state = stateOf(target);
       if (state.mode !== Mode.HACK || state.hackJob) continue;
-      const job = planHack(ns, target, freeThreads());
+      const job = planHack(ns, target, freeThreads(), totalThreads * MAX_HACK_JOB_SHARE_OF_THREADS);
       // A weaken-only job means there was no room to hack or regrow: wait for the reserved RAM.
       if (job.hackThreads > 0 || job.growThreads > 0) launch(target, job);
     }
@@ -205,7 +210,7 @@ export async function main(ns) {
       const job = stateOf(target).hackJob;
       // Adopted after a restart (fraction 0, unknown shape): reserve the full next job like an idle target.
       if (job && job.hackFraction > 0) return sum + (now >= job.hackEndsAt ? job.hackThreads : 0) + (now >= job.growEndsAt ? job.growThreads : 0);
-      return sum + jobThreads(planHack(ns, target, totalThreads));
+      return sum + jobThreads(planHack(ns, target, totalThreads, totalThreads * MAX_HACK_JOB_SHARE_OF_THREADS));
     }, 0);
     const prepCapacity = Math.max(1, totalThreads - reservedThreads);
     // Sticky focus: scores shift with level, so without it RAM hops between half-prepped targets.
@@ -361,10 +366,11 @@ function planPrep(ns, target, availableThreads, prepsInFlight) {
   return { kind: Mode.PREP, hackFraction: 0, hackThreads: 0, growThreads, weakenThreads, weakenAfterGrowThreads };
 }
 
-// Largest hack (fraction <= MAX_HACK_FRACTION) whose threads fit availableThreads; grow and weaken
+// Largest hack whose threads fit availableThreads, with fraction <= ALWAYS_ALLOWED_HACK_FRACTION or,
+// beyond that, up to MAX_HACK_FRACTION while the job stays within largeJobThreads. Grow and weaken
 // also repair any drift (money below max, security above min) so a hack-mode target stays healthy.
-/** @param {NS} ns @param {string} target @param {number} availableThreads @returns {Job} */
-export function planHack(ns, target, availableThreads) {
+/** @param {NS} ns @param {string} target @param {number} availableThreads @param {number} largeJobThreads @returns {Job} */
+export function planHack(ns, target, availableThreads, largeJobThreads) {
   const money = ns.getServerMoneyAvailable(target);
   const extraSecurity = ns.getServerSecurityLevel(target) - ns.getServerMinSecurityLevel(target);
   const stolenPerThread = ns.hackAnalyze(target);
@@ -375,11 +381,13 @@ export function planHack(ns, target, availableThreads) {
       + hackThreads * SECURITY_PER_HACK_THREAD + growThreads * SECURITY_PER_GROW_THREAD) / SECURITY_PER_WEAKEN_THREAD) + 1;
     return { kind: Mode.HACK, hackFraction, hackThreads, growThreads, weakenThreads, weakenAfterGrowThreads: 0 };
   };
-  // Binary search for the most hack threads that still fit.
+  const acceptable = (/** @type {Job} */ job) => jobThreads(job) <= availableThreads
+    && (job.hackFraction <= ALWAYS_ALLOWED_HACK_FRACTION || jobThreads(job) <= largeJobThreads);
+  // Binary search for the most hack threads that are still acceptable (both limits grow with threads).
   let fits = 0, tooMany = Math.max(1, Math.floor(MAX_HACK_FRACTION / stolenPerThread)) + 1;
   while (tooMany - fits > 1) {
     const middle = Math.floor((fits + tooMany) / 2);
-    if (jobThreads(jobFor(middle)) <= availableThreads) fits = middle; else tooMany = middle;
+    if (acceptable(jobFor(middle))) fits = middle; else tooMany = middle;
   }
   const job = jobFor(fits);
   if (job.growThreads + job.weakenThreads > availableThreads) { // can't even repair fully: repair what fits
