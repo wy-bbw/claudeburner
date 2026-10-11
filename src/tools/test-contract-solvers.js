@@ -1,9 +1,9 @@
 import { CONTRACT_SOLVERS } from "lib/contract-solvers.js";
 
-const RESULTS_FILE = "data/contract-tests.txt";
+const RESULTS_FILE = "data/contract-solver-test-results.txt";
 
 // Tests every solver against dummy contracts (no reward) on this server and writes one JSON line
-// per attempt to data/contract-tests.txt. services/coding-contracts.js only trusts types that passed.
+// per attempt to data/contract-solver-test-results.txt (machine-readable JSON; dummy contracts never pay a reward). services/coding-contracts.js only trusts types that passed.
 // Usage: run tools/test-contract-solvers.js [rounds per type, default 3]
 /** @param {NS} ns */
 export async function main(ns) {

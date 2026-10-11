@@ -2,7 +2,7 @@ import { scanAll } from "lib/net.js";
 import { CONTRACT_SOLVERS } from "lib/contract-solvers.js";
 import { appendLog } from "lib/log.js";
 
-const TEST_RESULTS_FILE = "data/contract-tests.txt";
+const TEST_RESULTS_FILE = "data/contract-solver-test-results.txt";
 const LOG_FILE = "data/coding-contracts.txt";
 const SCAN_INTERVAL_MS = 60_000;
 
