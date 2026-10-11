@@ -53,7 +53,7 @@ const Mode = Object.freeze({ PREP: "prep", HACK: "hack" });
 //      find their RAM again). Prep jobs stack: only threads not already in flight are added, so
 //      the focused target gets everything it needs first. Grow lands after the weakens.
 // Runs on a rooted server. Uses home RAM too, except --home-reserve GB (agent, metrics, tools).
-// flags: --only <target> (experiments), --rep <fraction of RAM for share workers, default 0.25>,
+// flags: --only <target> (experiments), --rep <fraction of RAM for share workers, default 0.1 (measured: ~same rep boost as 0.25)>,
 //        --home-reserve <GB kept free on home, default 16>
 /** @param {NS} ns */
 export async function main(ns) {
@@ -62,7 +62,7 @@ export async function main(ns) {
   const threadRam = Math.max(ns.getScriptRam(HACK_WORKER, "home"), ns.getScriptRam(GROW_WORKER, "home"), ns.getScriptRam(WEAKEN_WORKER, "home"));
   const shareThreadRam = ns.getScriptRam(SHARE_WORKER, "home");
   // Not "--share": the RAM calculator would bill `flags.share` as ns.share() (2.4 GB).
-  const flags = ns.flags([["only", ""], ["rep", 0.25], ["home-reserve", 16]]);
+  const flags = ns.flags([["only", ""], ["rep", 0.1], ["home-reserve", 16]]);
   const onlyTarget = String(flags.only);
   const shareFraction = Number(flags.rep);
   const homeReserveGb = Number(flags["home-reserve"]);
