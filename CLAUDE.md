@@ -28,5 +28,6 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 - `lib/` shared code · `workers/` single-operation jobs (hack, grow, weaken, share), started only by the controller ·
   `services/` long-running (`controller.js` on a rooted server, `metrics.js` on home) · `tools/` one-shots
   (`root`, `path` for backdoor connect chains, `kill`, `state`, `check-grow`).
+- Coding contracts: `lib/contract-solvers.js` (29 of 30 types; Largest Rectangle in a Matrix missing). Verify with `tools/test-contract-solvers.js` (dummy contracts, results in data/contract-tests.txt) before trusting changes; `services/coding-contracts.js` on home only attempts verified types and blocks a type after one real failure. Log: data/coding-contracts.txt. First run: 10 solved, ~5k CyberSec rep + $50M.
 - Start the controller: `node bridge/cli.mjs run services/controller.js -h harakiri-sushi --rep <share fraction>`.
 - Use meaningful names (user rule, see ~/.claude/CLAUDE.md).
