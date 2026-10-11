@@ -26,7 +26,7 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 ## Layout (`src/`, synced to home)
 - `agent.js` — top level because the user types `run agent.js` after each reset.
 - `lib/` shared code · `workers/` single-operation jobs (hack, grow, weaken, share), started only by the controller ·
-  `services/` long-running (`controller.js` on a rooted server, `metrics.js` on n00dles) · `tools/` one-shots
+  `services/` long-running (`controller.js` on a rooted server, `metrics.js` on home) · `tools/` one-shots
   (`root`, `path` for backdoor connect chains, `kill`, `state`, `check-grow`).
 - Start the controller: `node bridge/cli.mjs run services/controller.js -h harakiri-sushi --rep <share fraction>`.
 - Use meaningful names (user rule, see ~/.claude/CLAUDE.md).
