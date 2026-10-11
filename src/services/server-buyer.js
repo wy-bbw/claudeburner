@@ -1,3 +1,5 @@
+import { appendLog } from "lib/log.js";
+
 const NAME_PREFIX = "cloud-";
 const LOG_FILE = "data/server-buyer.txt";
 const CHECK_INTERVAL_MS = 10_000;
@@ -16,7 +18,7 @@ const CHEAPER_THAN_SERVERS = ["BruteSSH.exe", "FTPCrack.exe", "relaySMTP.exe", "
 //   - budget = money * --spend
 //   - below the server limit: buy the largest power-of-two RAM the budget allows (>= --min-ram)
 //   - at the limit: upgrade the smallest server to the largest size the budget allows
-// Stops when every server is at the game's RAM limit. Log: data/server-buyer.txt
+// Stops when every server is at the game's RAM limit. Log (readable lines): data/server-buyer.txt
 // flags: --spend <fraction of the budget per purchase, default 0.5>, --min-ram <GB, default 8>
 /** @param {NS} ns */
 export async function main(ns) {
@@ -26,7 +28,7 @@ export async function main(ns) {
   const minRam = Number(flags["min-ram"]);
   const ramLimit = ns.cloud.getRamLimit();
   const serverLimit = ns.cloud.getServerLimit();
-  const log = (/** @type {object} */ entry) => ns.write(LOG_FILE, JSON.stringify({ time: Date.now(), ...entry }) + "\n", "a");
+  const log = (/** @type {string} */ event, /** @type {string} */ details) => appendLog(ns, LOG_FILE, event, details);
 
   while (true) {
     // Only buy RAM when the controller actually runs short of it (early in a round the targets,
@@ -43,7 +45,7 @@ export async function main(ns) {
       if (ram > 0) {
         const name = ns.cloud.purchaseServer(nextFreeName(owned), ram);
         if (name) {
-          log({ event: "bought", name, ram, cost: ns.cloud.getServerCost(ram) });
+          log("bought", `${name} with ${ns.format.ram(ram)} for $${ns.format.number(ns.cloud.getServerCost(ram))}`);
           ns.toast(`Bought ${name} with ${ns.format.ram(ram)}`, "info", 5000);
         }
       }
@@ -51,12 +53,12 @@ export async function main(ns) {
       const smallest = owned.reduce((a, b) => (ns.getServerMaxRam(a) <= ns.getServerMaxRam(b) ? a : b));
       const currentRam = ns.getServerMaxRam(smallest);
       if (currentRam >= ramLimit) {
-        log({ event: "done", reason: "all servers at the RAM limit" });
+        log("done", "all servers at the RAM limit");
         return;
       }
       const ram = largestAffordableRam(currentRam * 2, ramLimit, budget, (size) => ns.cloud.getServerUpgradeCost(smallest, size));
       if (ram > 0 && ns.cloud.upgradeServer(smallest, ram)) {
-        log({ event: "upgraded", name: smallest, from: currentRam, to: ram });
+        log("upgraded", `${smallest} from ${ns.format.ram(currentRam)} to ${ns.format.ram(ram)}`);
       }
     }
     await ns.sleep(CHECK_INTERVAL_MS);
