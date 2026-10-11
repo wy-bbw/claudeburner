@@ -26,8 +26,9 @@ const HACK_KEEP_SEC = 5;     // ...and below min security + this
 //   2. prep-mode targets in score order with what's left (minus a reservation so busy hack
 //      targets find their RAM again). Prep jobs stack: only threads not already in flight are
 //      added, so the best target gets everything it needs first. Grow lands after the weakens.
-// Runs on a rooted server; never uses home RAM (reserved for agent one-shots).
-// flags: --only <target> (experiments), --rep <fraction of RAM for share workers, default 0.25>
+// Runs on a rooted server. Uses home RAM too, except --home-reserve GB (agent, metrics, tools).
+// flags: --only <target> (experiments), --rep <fraction of RAM for share workers, default 0.25>,
+//        --home-reserve <GB kept free on home, default 16>
 /** @param {NS} ns */
 export async function main(ns) {
   ns.disableLog("ALL");
@@ -35,9 +36,10 @@ export async function main(ns) {
   const slot = Math.max(ns.getScriptRam(HACK_WORKER, "home"), ns.getScriptRam(GROW_WORKER, "home"), ns.getScriptRam(WEAKEN_WORKER, "home"));
   const shareRam = ns.getScriptRam(SHARE_WORKER, "home");
   // Not "--share": the RAM calculator would bill `flags.share` as ns.share() (2.4 GB).
-  const flags = ns.flags([["only", ""], ["rep", 0.25]]);
+  const flags = ns.flags([["only", ""], ["rep", 0.25], ["home-reserve", 16]]);
   const only = String(flags.only);
   const shareFraction = Number(flags.rep);
+  const homeReserve = Number(flags["home-reserve"]);
 
   for (const h of scanAll(ns).keys()) if (h !== "home") ns.scriptKill(LEGACY_SHARE, h);
 
@@ -77,8 +79,12 @@ export async function main(ns) {
 
     const now = Date.now();
     const lvl = ns.getHackingLevel();
-    const free = rooted.map((h) => ({ h, n: Math.floor((ns.getServerMaxRam(h) - ns.getServerUsedRam(h)) / slot) }));
-    const totalSlots = rooted.reduce((s, h) => s + Math.floor(ns.getServerMaxRam(h) / slot), 0);
+    // Workers run on every rooted server plus home (minus a reserve for the agent and tools).
+    const workerHosts = [...rooted, "home"];
+    const usableRam = (/** @type {string} */ h) => Math.max(0, ns.getServerMaxRam(h) - (h === "home" ? homeReserve : 0));
+    const freeRam = (/** @type {string} */ h) => Math.max(0, usableRam(h) - ns.getServerUsedRam(h));
+    const free = workerHosts.map((h) => ({ h, n: Math.floor(freeRam(h) / slot) }));
+    const totalSlots = workerHosts.reduce((s, h) => s + Math.floor(usableRam(h) / slot), 0);
     const left = () => free.reduce((s, f) => s + f.n, 0);
 
     const targets = rooted
@@ -126,20 +132,20 @@ export async function main(ns) {
     }
 
     // 1b. top up share workers, then refresh the slot view for prep
-    const totalRam = rooted.reduce((s, h) => s + ns.getServerMaxRam(h), 0);
+    const totalRam = workerHosts.reduce((s, h) => s + usableRam(h), 0);
     const shareTarget = Math.floor((shareFraction * totalRam) / shareRam);
-    let shareThreads = rooted.reduce((s, h) => s + ns.ps(h).filter((p) => p.filename === SHARE_WORKER).reduce((t, p) => t + p.threads, 0), 0);
-    for (const h of rooted) { // over target (fraction lowered): stop whole hosts' share workers
+    let shareThreads = workerHosts.reduce((s, h) => s + ns.ps(h).filter((p) => p.filename === SHARE_WORKER).reduce((t, p) => t + p.threads, 0), 0);
+    for (const h of workerHosts) { // over target (fraction lowered): stop whole hosts' share workers
       if (shareThreads <= shareTarget) break;
       const n = ns.ps(h).filter((p) => p.filename === SHARE_WORKER).reduce((t, p) => t + p.threads, 0);
       if (n > 0 && ns.scriptKill(SHARE_WORKER, h)) shareThreads -= n;
     }
-    for (const h of rooted) {
+    for (const h of workerHosts) {
       if (shareThreads >= shareTarget) break;
-      const n = Math.min(shareTarget - shareThreads, Math.floor((ns.getServerMaxRam(h) - ns.getServerUsedRam(h)) / shareRam));
+      const n = Math.min(shareTarget - shareThreads, Math.floor(freeRam(h) / shareRam));
       if (n > 0 && ns.exec(SHARE_WORKER, h, n)) shareThreads += n;
     }
-    for (const f of free) f.n = Math.floor((ns.getServerMaxRam(f.h) - ns.getServerUsedRam(f.h)) / slot);
+    for (const f of free) f.n = Math.floor(freeRam(f.h) / slot);
 
     // 2. prep-mode targets in score order, minus the RAM busy hack targets will want back.
     // Conservative: reserves each busy hack job's full size, although part of it is still in use.
