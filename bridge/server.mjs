@@ -78,6 +78,24 @@ async function refreshDefs() {
   log("updated NetscriptDefinitions.d.ts");
 }
 
+// src/ is the source of truth. The in-game editor can write stale copies back
+// (open tabs are saved on close), so periodically compare and re-push.
+const norm = (s) => s.replace(/\r\n/g, "\n");
+async function checkDrift() {
+  if (!game) return;
+  try {
+    const inGame = new Map((await call("getAllFiles", { server: "home" })).map((f) => [f.filename, f.content]));
+    for (const abs of walk(SRC).filter((f) => SYNC_EXT.test(f))) {
+      const name = toGamePath(abs);
+      if (norm(inGame.get(name) ?? "") !== norm(fs.readFileSync(abs, "utf8"))) {
+        log("DRIFT", name, "differs in game, re-pushing");
+        await push(abs);
+      }
+    }
+  } catch (e) { log("drift check failed:", e.message); }
+}
+setInterval(checkDrift, 15000);
+
 const debounce = new Map();
 fs.mkdirSync(SRC, { recursive: true });
 fs.watch(SRC, { recursive: true }, (_ev, name) => {
