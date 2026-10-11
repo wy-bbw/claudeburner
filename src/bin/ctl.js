@@ -138,7 +138,13 @@ export async function main(ns) {
 
     // 2. prep-mode targets in score order, minus the RAM busy hack targets will want back.
     // Conservative: reserves each busy hack job's full size, although part of it is still in use.
-    const reserved = [...recs.values()].filter((r) => r.mode === "hack" && r.busyUntil > now).reduce((s, r) => s + r.threads, 0);
+    // Idle hack targets (waiting for RAM) reserve their next job's size too, or prep starves them.
+    const reserved = targets.filter(({ h }) => rec(h).mode === "hack").reduce((s, { h }) => {
+      const r = rec(h);
+      if (r.busyUntil > now) return s + r.threads;
+      const job = planHack(ns, h, totalSlots);
+      return s + job.h + job.g + job.w1;
+    }, 0);
     const cap = Math.max(1, totalSlots - reserved);
     // Sticky focus: scores shift with level, so without it RAM hops between half-prepped targets.
     // New focus = best score per remaining prep cycle (a nearly done target beats a better empty one).
