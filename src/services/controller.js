@@ -103,9 +103,10 @@ export async function main(ns) {
 
     const now = Date.now();
     const hackingLevel = ns.getHackingLevel();
-    // Workers run on every rooted server plus home (minus a reserve for the agent and tools).
-    const workerHosts = [...rootedHosts, "home"];
+    // Workers run on every rooted server plus home (minus a reserve for the agent and tools),
+    // biggest first: a job then lands in a few large processes instead of dozens of 9-thread ones.
     const usableRam = (/** @type {string} */ host) => Math.max(0, ns.getServerMaxRam(host) - (host === "home" ? homeReserveGb : 0));
+    const workerHosts = [...rootedHosts, "home"].sort((a, b) => usableRam(b) - usableRam(a));
     const freeRam = (/** @type {string} */ host) => Math.max(0, usableRam(host) - ns.getServerUsedRam(host));
     /** @type {HostCapacity[]} */
     const capacity = workerHosts.map((host) => ({ host, freeThreads: Math.floor(freeRam(host) / threadRam) }));
