@@ -18,10 +18,11 @@ const MAX_PREP_MINUTES = 60;        // don't start preps estimated to take longe
 const STAY_HACKING_MIN_MONEY = 0.5;
 const STAY_HACKING_MAX_EXTRA_SECURITY = 5;
 // ...and enters hack mode within these. Prep ends early: the hack job tops up the rest (grow is
-// multiplicative, so the last 25% is cheap), which saves a whole extra prep cycle for a few missing
-// percent. Security stays strict: it slows every operation.
+// multiplicative, so the last 25% is cheap) and removes extra security in the same cycle, so leftovers
+// only slow the FIRST cycle (phantasy at +5: 1.56x), while waiting costs a whole cycle without income.
+// So security uses the same bound for start and stay; the hysteresis is on money only.
 const START_HACKING_MIN_MONEY = 0.75;
-const START_HACKING_MAX_EXTRA_SECURITY = 1;
+const START_HACKING_MAX_EXTRA_SECURITY = STAY_HACKING_MAX_EXTRA_SECURITY;
 
 /** Target lifecycle: prep until min security / max money, then hack. Also the kind of a job. */
 const Mode = Object.freeze({ PREP: "prep", HACK: "hack" });
@@ -45,7 +46,7 @@ const Mode = Object.freeze({ PREP: "prep", HACK: "hack" });
 /** @typedef {{host: string, freeThreads: number}} HostCapacity */
 
 // Multi-target controller.
-//   Targets are in "prep" mode until >= 75% money at ~min security, then in "hack" mode, where
+//   Targets are in "prep" mode until >= 75% money and security <= min+5, then in "hack" mode, where
 //   they stay while money >= 50% and security <= min+5 (each hack job also repairs drift).
 //   1. hack-mode targets: one job per weaken time, best modelled $/s per thread first
 //   1b. share workers topped up to --rep of all RAM (faction rep boost), out of prep's share
