@@ -151,7 +151,9 @@ export async function main(ns) {
         const growThreads = startThreads(ns, capacity, GROW_WORKER, job.growThreads, target, jobId, 0);
         const weakenThreads = startThreads(ns, capacity, WEAKEN_WORKER, job.weakenThreads, target, jobId, 0);
         started = hackThreads + growThreads + weakenThreads;
-        state.hackJob = {
+        // Nothing started (no free RAM): stay idle, so the target keeps reserving its next job
+        // instead of counting as busy for a whole cycle while prep takes all the RAM.
+        if (started > 0) state.hackJob = {
           endsAt: now + weakenTime + 500,
           totalThreads: started,
           hackFraction: job.hackFraction,
@@ -170,7 +172,8 @@ export async function main(ns) {
       const state = stateOf(target);
       if (state.mode !== Mode.HACK || state.hackJob) continue;
       const job = planHack(ns, target, freeThreads());
-      if (jobThreads(job) > 0) launch(target, job);
+      // A weaken-only job means there was no room to hack or regrow: wait for the reserved RAM.
+      if (job.hackThreads > 0 || job.growThreads > 0) launch(target, job);
     }
 
     // 1b. top up share workers, then refresh the capacity view for prep
