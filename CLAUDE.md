@@ -8,6 +8,16 @@ prep the next target in parallel. Verify every model/claim with the metrics samp
 baseline vs change, marks in `marks.txt`) — formulas from memory have been wrong before.
 Lesson: every server starts at 4% of max money; low-growth targets need hours of prep (sigma-cosmetics ~5 h), n00dles ~1 min.
 
+## Status (2026-10-11, end of first session)
+- Round 3 of BitNode 1 (two augmentation installs done). Factions joined: CyberSec, NiteSec, Sector-12, Netburners.
+  NiteSec rep is the current bottleneck (~4k, ~2 rep/s); next: The Black Hand (I.I.I.I backdoor, ~level 350).
+- Income ~10–15M $/s with all port openers; home 2 TB; ~120 TB incl. cloud servers; share at 10%.
+- The bridge ran as a background task of the session: start it again with `node bridge/server.mjs` (the game reconnects).
+- Darknet: map + crack tools exist (`tools/darknet-*.js`); further darknet work was stopped by a safety
+  classifier in the first session — don't continue it.
+- Ideas not started: install helper (aug order/cost/timing from a pasted faction list), stock market
+  (user's 2022 forecast strategy: buy >= 0.7, sell < 0.55), real HWGW batching, run dashboard artifact.
+
 ## Setup
 - `node bridge/server.mjs` — Remote API bridge. Game connects to ws://localhost:12525 (Options → Remote API, wss off).
   Pushes `src/**` to `home` on connect and on every change; refreshes `NetscriptDefinitions.d.ts` from the game.
