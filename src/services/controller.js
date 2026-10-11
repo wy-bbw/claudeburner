@@ -19,7 +19,8 @@ const MAX_HACK_FRACTION = 0.75;
 const MAX_HACK_JOB_SHARE_OF_THREADS = 0.15;
 const SCORING_HACK_FRACTION = 0.1;  // hack fraction assumed when ranking targets
 const MAX_PREP_MINUTES = 60;        // don't start preps estimated to take longer than this
-// A target in hack mode stays there while money and security are within these bounds...
+// A target in hack mode stays there while money and security are within these bounds (checked
+// between its jobs only)...
 const STAY_HACKING_MIN_MONEY = 0.5;
 const STAY_HACKING_MAX_EXTRA_SECURITY = 5;
 // ...and enters hack mode within these. Prep ends early: the hack job tops up the rest (grow is
@@ -122,7 +123,9 @@ export async function main(ns) {
       if (state.hackJob && state.hackJob.endsAt <= now) state.hackJob = null;
       const moneyFraction = ns.getServerMoneyAvailable(target) / ns.getServerMaxMoney(target);
       const extraSecurity = ns.getServerSecurityLevel(target) - ns.getServerMinSecurityLevel(target);
-      if (state.mode === Mode.HACK && (moneyFraction < STAY_HACKING_MIN_MONEY || extraSecurity > STAY_HACKING_MAX_EXTRA_SECURITY)) {
+      // Only judge a hack target between jobs: mid-cycle its money dips by up to MAX_HACK_FRACTION by design.
+      if (state.mode === Mode.HACK && !state.hackJob
+        && (moneyFraction < STAY_HACKING_MIN_MONEY || extraSecurity > STAY_HACKING_MAX_EXTRA_SECURITY)) {
         state.mode = Mode.PREP;
       } else if (state.mode === Mode.PREP && state.prepsInFlight.length === 0
         && moneyFraction >= START_HACKING_MIN_MONEY && extraSecurity <= START_HACKING_MAX_EXTRA_SECURITY) {
