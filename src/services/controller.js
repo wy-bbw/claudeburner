@@ -185,24 +185,7 @@ export async function main(ns) {
       if (job.hackThreads > 0 || job.growThreads > 0) launch(target, job);
     }
 
-    // 1b. top up share workers, then refresh the capacity view for prep
-    const totalRam = workerHosts.reduce((sum, host) => sum + usableRam(host), 0);
-    const shareThreadsWanted = Math.floor((shareFraction * totalRam) / shareThreadRam);
-    const shareThreadsOn = (/** @type {string} */ host) => ns.ps(host).filter((process) => process.filename === SHARE_WORKER).reduce((sum, process) => sum + process.threads, 0);
-    let shareThreads = workerHosts.reduce((sum, host) => sum + shareThreadsOn(host), 0);
-    for (const host of workerHosts) { // over target (fraction lowered): stop whole hosts' share workers
-      if (shareThreads <= shareThreadsWanted) break;
-      const onHost = shareThreadsOn(host);
-      if (onHost > 0 && ns.scriptKill(SHARE_WORKER, host)) shareThreads -= onHost;
-    }
-    for (const host of workerHosts) {
-      if (shareThreads >= shareThreadsWanted) break;
-      const toStart = Math.min(shareThreadsWanted - shareThreads, Math.floor(freeRam(host) / shareThreadRam));
-      if (toStart > 0 && ns.exec(SHARE_WORKER, host, toStart)) shareThreads += toStart;
-    }
-    for (const c of capacity) c.freeThreads = Math.floor(freeRam(c.host) / threadRam);
-
-    // 2. prep-mode targets, minus the RAM hack targets will want back:
+    // Reservation: RAM hack targets will want back, kept from share workers and prep:
     //    busy ones reserve what their finished hack/grow threads freed (the rest is still in use),
     //    idle ones (waiting for RAM) their next job's size, or prep starves them.
     //    Prep targets already within the start bounds (only waiting for their last prep jobs) reserve
@@ -216,6 +199,28 @@ export async function main(ns) {
       if (job && job.hackFraction > 0) return sum + (now >= job.hackEndsAt ? job.hackThreads : 0) + (now >= job.growEndsAt ? job.growThreads : 0);
       return sum + jobThreads(planHack(ns, target, totalThreads, totalThreads * MAX_HACK_JOB_SHARE_OF_THREADS));
     }, 0);
+    // 1b. top up share workers from RAM that is free and not reserved, then refresh the capacity view
+    const totalRam = workerHosts.reduce((sum, host) => sum + usableRam(host), 0);
+    const shareThreadsWanted = Math.floor((shareFraction * totalRam) / shareThreadRam);
+    const shareThreadsOn = (/** @type {string} */ host) => ns.ps(host).filter((process) => process.filename === SHARE_WORKER).reduce((sum, process) => sum + process.threads, 0);
+    let shareThreads = workerHosts.reduce((sum, host) => sum + shareThreadsOn(host), 0);
+    for (const host of workerHosts) { // over target (fraction lowered): stop whole hosts' share workers
+      if (shareThreads <= shareThreadsWanted) break;
+      const onHost = shareThreadsOn(host);
+      if (onHost > 0 && ns.scriptKill(SHARE_WORKER, host)) shareThreads -= onHost;
+    }
+    let shareRamBudget = Math.max(0, (freeThreads() - reservedThreads) * threadRam);
+    for (const host of workerHosts) {
+      if (shareThreads >= shareThreadsWanted) break;
+      const toStart = Math.min(shareThreadsWanted - shareThreads, Math.floor(Math.min(freeRam(host), shareRamBudget) / shareThreadRam));
+      if (toStart > 0 && ns.exec(SHARE_WORKER, host, toStart)) {
+        shareThreads += toStart;
+        shareRamBudget -= toStart * shareThreadRam;
+      }
+    }
+    for (const c of capacity) c.freeThreads = Math.floor(freeRam(c.host) / threadRam);
+
+    // 2. prep-mode targets with what is left after the reservation.
     const prepCapacity = Math.max(1, totalThreads - reservedThreads);
     // Sticky focus: scores shift with level, so without it RAM hops between half-prepped targets.
     // New focus = best score per remaining prep cycle (a nearly done target beats a better empty one).
