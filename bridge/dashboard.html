@@ -52,6 +52,8 @@
   input[type=number] { width: 90px; background: var(--page); color: var(--primary); border: 1px solid var(--axis); border-radius: 6px; padding: 4px 6px; font: inherit; }
   label.field { display: inline-flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); margin-right: 12px; }
   svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .tooltip { position: absolute; top: -26px; display: none; pointer-events: none; white-space: nowrap; font-size: 12px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
 </style>
 </head>
 <body>
@@ -82,28 +84,86 @@ const fmtInt = (n) => n == null ? "–" : Math.round(n).toLocaleString("en-US");
 const el = (id) => document.getElementById(id);
 const text = (s) => document.createTextNode(s == null ? "" : String(s));
 
-// Minimal line chart: points [{t, perSecond}], returns an SVG string. Crosshair handled by caller via data attrs.
-function lineChart(points, color, format) {
-  const W = 760, H = 180, padL = 56, padR = 16, padT = 12, padB = 24;
-  if (!points || points.length < 2) return `<p class="muted">Not enough data yet.</p>`;
-  const xs = points.map((p) => p.t), ys = points.map((p) => p.perSecond);
-  const minX = Math.min(...xs), maxX = Math.max(...xs), maxY = Math.max(...ys, 1), minY = 0;
-  const sx = (x) => padL + (maxX === minX ? 0 : (x - minX) / (maxX - minX)) * (W - padL - padR);
-  const sy = (y) => H - padB - (y - minY) / (maxY - minY) * (H - padT - padB);
+const fmtClock = (t) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+// Line chart with a log10 y axis and clock-time x ticks. points: [{t, perSecond}] sorted by t.
+// Zero values (income right after an install) can't be logged; they sit on the bottom line.
+// Returns {svg, geometry}; the geometry lets the hover layer map pointer x to the nearest point.
+function logLineChart(points, color, format) {
+  const W = 760, H = 210, padL = 64, padR = 16, padT = 12, padB = 26;
+  const positive = points.map((p) => p.perSecond).filter((v) => v > 0);
+  const minExp = Math.floor(Math.log10(Math.min(...positive)));
+  let maxExp = Math.ceil(Math.log10(Math.max(...positive)));
+  if (maxExp <= minExp) maxExp = minExp + 1;
+  const minX = points[0].t, maxX = points[points.length - 1].t;
+  const sx = (t) => padL + (maxX === minX ? 0 : (t - minX) / (maxX - minX)) * (W - padL - padR);
+  const sy = (v) => {
+    const exponent = v > 0 ? Math.max(minExp, Math.log10(v)) : minExp;
+    return H - padB - (exponent - minExp) / (maxExp - minExp) * (H - padT - padB);
+  };
+
+  // y ticks: every power of ten; with a narrow range (≤ 2 decades) also 2× and 5×
+  const yTicks = [];
+  for (let exponent = minExp; exponent <= maxExp; exponent++) {
+    for (const factor of maxExp - minExp <= 2 ? [1, 2, 5] : [1]) {
+      const value = factor * 10 ** exponent;
+      if (Math.log10(value) <= maxExp) yTicks.push({ value, major: factor === 1 });
+    }
+  }
+  const yGrid = yTicks.map(({ value, major }) => `<line x1="${padL}" x2="${W - padR}" y1="${sy(value).toFixed(1)}" y2="${sy(value).toFixed(1)}" stroke="var(--grid)"/>` +
+    `<text x="${padL - 6}" y="${(sy(value) + 4).toFixed(1)}" text-anchor="end" fill="var(--muted)" font-size="${major ? 11 : 10}">${format(value).replace(".00", "")}</text>`).join("");
+
+  // x ticks: clock times on whole multiples of a step that gives about 4-9 ticks
+  const spanMinutes = (maxX - minX) / 60000;
+  const stepMinutes = [5, 10, 15, 30, 60].find((step) => spanMinutes / step <= 9) ?? 60;
+  const stepMs = stepMinutes * 60000;
+  const xTicks = [];
+  for (let t = Math.ceil(minX / stepMs) * stepMs; t <= maxX; t += stepMs) xTicks.push(t);
+  const xGrid = xTicks.map((t) => `<line x1="${sx(t).toFixed(1)}" x2="${sx(t).toFixed(1)}" y1="${padT}" y2="${H - padB}" stroke="var(--grid)"/>` +
+    `<text x="${sx(t).toFixed(1)}" y="${H - 8}" text-anchor="middle" fill="var(--muted)" font-size="11">${fmtClock(t)}</text>`).join("");
+
   const path = points.map((p, i) => (i ? "L" : "M") + sx(p.t).toFixed(1) + " " + sy(p.perSecond).toFixed(1)).join(" ");
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => minY + f * (maxY - minY));
-  const gridLines = ticks.map((v) => `<line x1="${padL}" x2="${W - padR}" y1="${sy(v).toFixed(1)}" y2="${sy(v).toFixed(1)}" stroke="var(--grid)"/>` +
-    `<text x="${padL - 6}" y="${(sy(v) + 4).toFixed(1)}" text-anchor="end" fill="var(--muted)" font-size="11">${format(v)}</text>`).join("");
   const last = points[points.length - 1];
-  const spanMin = Math.round((maxX - minX) / 60000);
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" font-family="system-ui">
-    ${gridLines}
+  const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" font-family="system-ui" style="touch-action:none">
+    ${yGrid}${xGrid}
     <line x1="${padL}" x2="${W - padR}" y1="${H - padB}" y2="${H - padB}" stroke="var(--axis)"/>
-    <text x="${padL}" y="${H - 4}" fill="var(--muted)" font-size="11">${spanMin} min ago</text>
-    <text x="${W - padR}" y="${H - 4}" text-anchor="end" fill="var(--muted)" font-size="11">now</text>
     <path d="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
     <circle cx="${sx(last.t).toFixed(1)}" cy="${sy(last.perSecond).toFixed(1)}" r="4" fill="${color}" stroke="var(--surface)" stroke-width="2"/>
+    <g class="hover" style="display:none;pointer-events:none">
+      <line class="hover-line" y1="${padT}" y2="${H - padB}" stroke="var(--secondary)" stroke-width="1"/>
+      <circle class="hover-dot" r="4" fill="${color}" stroke="var(--surface)" stroke-width="2"/>
+    </g>
+    <rect x="${padL}" y="${padT}" width="${W - padL - padR}" height="${H - padT - padB}" fill="transparent" class="hover-area"/>
   </svg>`;
+  return { svg, geometry: { W, sx, sy } };
+}
+
+// Crosshair + tooltip: snaps to the nearest point. Remembers the pointer's position, so a hover survives the 5 s refresh.
+let incomeHoverX = null;
+function attachHover(container, points, geometry, format) {
+  const svgElement = container.querySelector("svg");
+  const group = svgElement.querySelector(".hover"), line = svgElement.querySelector(".hover-line"), dot = svgElement.querySelector(".hover-dot");
+  const tooltip = container.querySelector(".tooltip");
+  const show = (viewX) => {
+    let nearest = points[0];
+    for (const p of points) if (Math.abs(geometry.sx(p.t) - viewX) < Math.abs(geometry.sx(nearest.t) - viewX)) nearest = p;
+    const x = geometry.sx(nearest.t), y = geometry.sy(nearest.perSecond);
+    line.setAttribute("x1", x); line.setAttribute("x2", x);
+    dot.setAttribute("cx", x); dot.setAttribute("cy", y);
+    group.style.display = "";
+    tooltip.replaceChildren();
+    const value = document.createElement("strong"); value.textContent = format(nearest.perSecond) + "/s";
+    const time = document.createElement("span"); time.className = "muted"; time.textContent = " at " + fmtClock(nearest.t);
+    tooltip.append(value, time);
+    const scale = svgElement.getBoundingClientRect().width / geometry.W;
+    tooltip.style.left = Math.min(x * scale + 10, svgElement.getBoundingClientRect().width - 160) + "px";
+    tooltip.style.display = "block";
+  };
+  const hide = () => { group.style.display = "none"; tooltip.style.display = "none"; };
+  const toViewX = (event) => (event.clientX - svgElement.getBoundingClientRect().left) / svgElement.getBoundingClientRect().width * geometry.W;
+  svgElement.addEventListener("pointermove", (event) => { incomeHoverX = toViewX(event); show(incomeHoverX); });
+  svgElement.addEventListener("pointerleave", () => { incomeHoverX = null; hide(); });
+  if (incomeHoverX !== null) show(incomeHoverX);
 }
 
 function renderIncome(income) {
@@ -114,8 +174,13 @@ function renderIncome(income) {
     <div class="tile"><div class="label">Hacking level</div><div class="value">${fmtInt(income.hackingLevel)}</div></div>
     <div class="tile"><div class="label">Money</div><div class="value">${fmtMoney(income.money)}</div></div>
   </div>`;
+  const points = income.points || [];
+  const hasData = points.length >= 2 && points.some((p) => p.perSecond > 0);
+  const chart = hasData ? logLineChart(points, BLUE, fmtMoney) : null;
   card.innerHTML = `<h2>Income & hacking</h2>${tiles}<div class="muted" style="font-size:12px;margin-bottom:4px">
-    <span class="key" style="background:${BLUE}"></span>Income per second, last 2 h (per-minute average)</div>${lineChart(income.points, BLUE, fmtMoney)}`;
+    Income per second, last 2 h (per-minute average, log scale)</div>
+    <div class="chart" style="position:relative">${chart ? chart.svg : '<p class="muted">Not enough data yet.</p>'}<div class="tooltip"></div></div>`;
+  if (chart) attachHover(card.querySelector(".chart"), points, chart.geometry, fmtMoney);
 }
 
 function renderHacking(hacking) {
@@ -166,41 +231,71 @@ function renderContracts(contracts) {
   card.innerHTML = `<h2>Coding contracts</h2>${tiles}<div class="events">${rows || '<div class="muted">none yet</div>'}</div>`;
 }
 
-// Reputation timer: scripts can't read faction favor/rep, so the user types the numbers. Saved in localStorage.
+// Reputation & favor: scripts can't read faction favor/rep without Source-File 4, so the user types the numbers
+// once; the card then extrapolates rep at the given rate every second. Saved in localStorage with the entry time.
+// Favor after an install comes from the cumulative rep: rep = 25000 * (1.02^favor - 1).
+const favorToRep = (favor) => 25000 * (Math.pow(1.02, favor) - 1);
+const repToFavor = (rep) => Math.log(rep / 25000 + 1) / Math.log(1.02);
+const REP_FIELDS = ["rep-favor", "rep-current", "rep-rate", "rep-goal-favor", "rep-goal"];
+let repEnteredAt = Date.now();
+
 function renderRepCard() {
   const card = el("card-rep");
-  if (card.dataset.built) { updateRepResult(); return; }
+  if (card.dataset.built) return;
   card.dataset.built = "1";
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem("rep") || "{}"); } catch {}
-  card.innerHTML = `<h2>Reputation timer</h2>
+  repEnteredAt = saved.enteredAt ?? Date.now();
+  const field = (id, label, value) => `<label class="field">${label}<input type="number" id="${id}" value="${value ?? ""}"></label>`;
+  card.innerHTML = `<h2>Reputation & favor</h2>
     <div style="margin-bottom:12px">
-      <label class="field">Current rep<input type="number" id="rep-current" value="${saved.current ?? ""}"></label>
-      <label class="field">Rate /s<input type="number" id="rep-rate" value="${saved.rate ?? ""}"></label>
-      <label class="field">Goal rep<input type="number" id="rep-goal" value="${saved.goal ?? ""}"></label>
+      ${field("rep-favor", "Favor now", saved.favor)}${field("rep-current", "Rep this run", saved.current)}${field("rep-rate", "Rate /s", saved.rate)}
     </div>
-    <div id="rep-result" class="tiles"></div>
-    <p class="muted" style="font-size:12px">Favor needs cumulative rep 25000·(1.02^favor − 1). 150 favor = 462,490 rep (donations unlock).</p>`;
-  for (const id of ["rep-current", "rep-rate", "rep-goal"]) el(id).addEventListener("input", () => {
-    localStorage.setItem("rep", JSON.stringify({ current: +el("rep-current").value, rate: +el("rep-rate").value, goal: +el("rep-goal").value }));
+    <div style="margin-bottom:12px">
+      ${field("rep-goal-favor", "Goal favor", saved.goalFavor ?? 150)}${field("rep-goal", "Goal rep (optional)", saved.goal)}
+    </div>
+    <div id="rep-result"></div>
+    <p class="muted" style="font-size:12px">Type the numbers from the faction page once; rep is extrapolated at the rate from then on.
+      Favor after install = favor of (rep the current favor stands for + rep this run). 150 favor unlocks donations.</p>`;
+  for (const id of REP_FIELDS) el(id).addEventListener("input", () => {
+    repEnteredAt = Date.now();
+    const value = (fieldId) => el(fieldId).value === "" ? undefined : +el(fieldId).value;
+    try {
+      localStorage.setItem("rep", JSON.stringify({ favor: value("rep-favor"), current: value("rep-current"), rate: value("rep-rate"),
+        goalFavor: value("rep-goal-favor"), goal: value("rep-goal"), enteredAt: repEnteredAt }));
+    } catch {}
     updateRepResult();
   });
   updateRepResult();
+  setInterval(updateRepResult, 1000);
 }
-function favorToRep(favor) { return 25000 * (Math.pow(1.02, favor) - 1); }
+
+const formatDuration = (seconds) => {
+  const minutes = seconds / 60;
+  return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${Math.round(minutes % 60)} min` : `${Math.max(1, Math.round(minutes))} min`;
+};
+
 function updateRepResult() {
-  const current = +el("rep-current").value, rate = +el("rep-rate").value;
-  let goal = +el("rep-goal").value;
-  const result = el("rep-result");
-  if (!goal) goal = Math.round(favorToRep(150)); // default goal: 150 favor
-  const remaining = goal - current;
-  let timeStr = "–";
-  if (rate > 0 && remaining > 0) {
-    const mins = remaining / rate / 60;
-    timeStr = mins >= 60 ? `${Math.floor(mins / 60)} h ${Math.round(mins % 60)} min` : `${Math.round(mins)} min`;
-  } else if (remaining <= 0) timeStr = "reached";
-  result.innerHTML = `<div class="tile"><div class="label">Remaining</div><div class="value">${fmtInt(Math.max(0, remaining))}</div><div class="sub">goal ${fmtInt(goal)}</div></div>
-    <div class="tile"><div class="label">Time left</div><div class="value">${timeStr}</div></div>`;
+  const favor = +el("rep-favor").value || 0, rate = +el("rep-rate").value || 0;
+  const goalFavor = +el("rep-goal-favor").value || 150, goalRep = +el("rep-goal").value || 0;
+  const repNow = (+el("rep-current").value || 0) + rate * (Date.now() - repEnteredAt) / 1000;
+  const favorAfterInstall = repToFavor(favorToRep(favor) + repNow);
+  const neededForGoalFavor = favorToRep(goalFavor) - favorToRep(favor) - repNow;
+  const progress = Math.min(1, (favorToRep(favor) + repNow) / favorToRep(goalFavor));
+  const eta = (remaining) => remaining <= 0 ? "reached" : rate > 0
+    ? `${formatDuration(remaining / rate)} (${new Date(Date.now() + remaining / rate * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})`
+    : "enter a rate";
+  const tile = (label, value, sub) => `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+  el("rep-result").innerHTML = `
+    <div class="tiles">
+      ${tile("Rep now (estimated)", fmtInt(repNow))}
+      ${tile("Favor after install", favorAfterInstall.toFixed(1), `now ${favor}`)}
+      ${tile(`Rep to ${goalFavor} favor`, fmtInt(Math.max(0, neededForGoalFavor)), eta(neededForGoalFavor))}
+      ${goalRep ? tile(`Rep to ${fmtInt(goalRep)}`, fmtInt(Math.max(0, goalRep - repNow)), eta(goalRep - repNow)) : ""}
+    </div>
+    <div title="${Math.round(progress * 100)}% of the rep for ${goalFavor} favor" style="height:8px;border-radius:4px;background:var(--grid);overflow:hidden">
+      <div style="height:100%;width:${(progress * 100).toFixed(1)}%;background:var(--blue);border-radius:4px"></div>
+    </div>`;
 }
 
 function esc(s) { const d = document.createElement("div"); d.appendChild(text(s)); return d.innerHTML; }
