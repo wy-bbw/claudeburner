@@ -4,11 +4,13 @@
 // - NetscriptDefinitions.d.ts is refreshed from the game on connect.
 // - A local HTTP control port lets bridge/cli.mjs issue RPC calls and queue
 //   commands for the in-game agent.js (the Remote API cannot run scripts).
+// - The same port serves a live dashboard at /dashboard (data: /dashboard/data, see dashboard-data.mjs).
 import { WebSocketServer } from "ws";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { collectDashboardData } from "./dashboard-data.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = path.join(ROOT, "src");
@@ -156,6 +158,12 @@ http.createServer((req, res) => {
       res.end(JSON.stringify(obj));
     };
     try {
+      // live dashboard: open http://127.0.0.1:12526/dashboard in a browser
+      if (req.url === "/dashboard") {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        return res.end(fs.readFileSync(path.join(ROOT, "bridge", "dashboard.html")));
+      }
+      if (req.url === "/dashboard/data") return reply(200, game ? { connected: true, ...(await collectDashboardData(call)) } : { connected: false });
       if (req.url === "/status") return reply(200, { connected: !!game });
       const req_ = body ? JSON.parse(body) : {};
       if (req.url === "/call") return reply(200, { result: await call(req_.method, req_.params) });

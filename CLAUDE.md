@@ -25,7 +25,7 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   AccountsManager 0-100 got 503 Service Unavailable partway through 100 tries (rate limit or server offline?).
   `services/darknet-crawler.js` is an older unfinished draft (truncated, fails tsc).
 - Ideas not started: install helper (aug order/cost/timing from a pasted faction list), stock market
-  (user's 2022 forecast strategy: buy >= 0.7, sell < 0.55), run dashboard artifact.
+  (user's 2022 forecast strategy: buy >= 0.7, sell < 0.55).
 - HWGW batcher (2026-10-11, Formulas.exe bought): ~110M $/s with the controller -> ~19B $/s within 11 min (mark `batcher-start`),
   0 desyncs / 0 cancelled batches in 40k; XP ~80x. Formulas.exe is lost on install: rebuy it ($5b at the darknet market) each round.
   Open: planned targets far from max money (rho-construction 4%) wait for prep RAM while batches hold their reserve.
@@ -33,6 +33,8 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 ## Setup
 - `node bridge/server.mjs` — Remote API bridge. Game connects to ws://localhost:12525 (Options → Remote API, wss off).
   Pushes `src/**` to `home` on connect and on every change; refreshes `NetscriptDefinitions.d.ts` from the game.
+- Live dashboard: http://127.0.0.1:12526/dashboard (served by the bridge; `bridge/dashboard.html` + `bridge/dashboard-data.mjs`
+  read data/metrics.txt, state.txt, darknet.txt, coding-contracts.txt; refresh 5 s). Open the URL, not the file.
 - `node bridge/cli.mjs …` — talks to the bridge (control port 12526): `status | sync | ls | get <file> | ram <file>… | run <script> [-h host] [-t N] [args] | call <method> [json]`.
 - After every reset (augmentation install or new BitNode) the user types `run start.js`: it roots, starts the hacking service on the biggest rooted server (`services/batcher.js` with Formulas.exe, else `controller.js`; the controller runs start.js itself once Formulas.exe appears, and start.js kills it), metrics if home has room, then spawns `agent.js` (fits an 8 GB home). `agent.js` must be running on home. It executes `cli run` commands; for remote hosts it scp's all `.js` first.
 - Node is at `C:\Program Files\nodejs` — prepend to PATH in shells started before the install.
