@@ -24,8 +24,13 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   authorized" probably gives partial feedback, but authenticate only answers 401 → look at heartbleed logs).
   AccountsManager 0-100 got 503 Service Unavailable partway through 100 tries (rate limit or server offline?).
   `services/darknet-crawler.js` is an older unfinished draft (truncated, fails tsc).
-- Ideas not started: install helper (aug order/cost/timing from a pasted faction list), stock market
-  (user's 2022 forecast strategy: buy >= 0.7, sell < 0.55).
+- Ideas not started: install helper (aug order/cost/timing from a pasted faction list).
+- Stock traders (2026-10-12): `services/stock-trader-4s.js` (4S forecast; buy >= 0.6 ranked by (forecast-0.5)*volatility,
+  sell < 0.55; 19.75 GB) and `services/stock-trader.js` (no 4S: forecast estimated from 50 ticks, buy >= 0.65, sell < 0.5,
+  quick sell at <= 2 of the last 10 ticks up; 14.75 GB). Shared code `lib/stock-trading.js`, log data/stocks.txt. Run one,
+  never both; `--keep <fraction>` holds cash back (default 0 = all in). Not worth it in BN1: the whole market is only ~$5.7t
+  (~6 s of late-BN1 hacking income); meant for BitNode 8. The 20-tick first version churned (bought noise, lost the spread);
+  the 50-tick version is computed, not yet tested live. Aug installs liquidate positions; TIX/4S access survives them.
 - HWGW batcher (2026-10-11, Formulas.exe bought): ~110M $/s with the controller -> ~19B $/s within 11 min (mark `batcher-start`),
   0 desyncs / 0 cancelled batches in 40k; XP ~80x. Formulas.exe is lost on install: rebuy it ($5b at the darknet market) each round.
   Open: planned targets far from max money (rho-construction 4%) wait for prep RAM while batches hold their reserve.
