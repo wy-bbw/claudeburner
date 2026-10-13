@@ -155,12 +155,15 @@ export function prepShape(ns, server, player, availableThreads, growMargin) {
   const formulas = ns.formulas.hacking;
   const weakenPerThread = formulas.weakenEffect(1);
   const extraSecurity = (server.hackDifficulty ?? 0) - (server.minDifficulty ?? 0);
-  const weaken1Threads = Math.max(0, Math.min(availableThreads, Math.ceil(extraSecurity / weakenPerThread - 1e-9)));
+  // Whole threads only: the budget comes from plan threads, which are averages (batches/s x thread time), so it can
+  // be fractional; capping weaken1 at it once passed 1295.47 threads to exec and crashed the batcher.
+  const budget = Math.floor(availableThreads);
+  const weaken1Threads = Math.max(0, Math.min(budget, Math.ceil(extraSecurity / weakenPerThread - 1e-9)));
   const atMinSecurity = { ...server, hackDifficulty: server.minDifficulty };
   const growNeeded = (server.moneyAvailable ?? 0) < (server.moneyMax ?? 0)
     ? Math.ceil(formulas.growThreads(atMinSecurity, player, server.moneyMax ?? 0) * growMargin) : 0;
   const threadsPerGrow = 1 + SECURITY_PER_GROW_THREAD / weakenPerThread;
-  const growThreads = Math.max(0, Math.min(growNeeded, Math.floor((availableThreads - weaken1Threads) / threadsPerGrow)));
+  const growThreads = Math.max(0, Math.min(growNeeded, Math.floor((budget - weaken1Threads) / threadsPerGrow)));
   const weaken2Threads = Math.ceil((growThreads * SECURITY_PER_GROW_THREAD) / weakenPerThread);
   return { weaken1Threads, growThreads, weaken2Threads, weakenMs: formulas.weakenTime(server, player), growMs: formulas.growTime(server, player) };
 }
