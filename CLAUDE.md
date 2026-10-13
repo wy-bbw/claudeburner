@@ -25,6 +25,16 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   level 3 only saves the $50b Office API + $50b Warehouse API unlocks per corp), BN4 three times (Singularity RAM
   x16/4/1), then BN10 (sleeves). Corporation bribes: $1b corp funds per rep point, no favor needed, but only from
   $100t corp valuation (game code). Build corp automation in BN3 in stages: status reader -> APIs -> products -> bribes.
+- BitNode 3 since 2026-10-13 (multipliers read from the game code: ServerMaxMoney 0.04, ScriptHackMoney 0.2, ServerGrowthRate
+  0.2, aug cost x3, FavorToDonateToFaction 0.5 = donations at 75 favor, WorldDaemonDifficulty 2). Hacking pays ~nothing
+  here; the corporation is the engine. Corp "Claudia AG", Agriculture division "food" (Sector-12 + Aevum at the start).
+  In BN3 (or with SF3.3) the Office and Warehouse APIs are unlocked for free. The game embeds a full corporation guide in
+  main.bundle.js (search "# General advice", "# Financial statement", "# Boost material"): read it instead of guessing.
+  Verified there: pre-IPO valuation = ($10b + funds/3 + 315,000 x profit/s) x 1.1^(offices+warehouses/12), round 1 offer
+  = 30% of it for 10% of the 1e9 original shares (government seed money = +500M shares); boost optimum (Lagrange; Real
+  Estate first, then Hardware + AI Cores, Robots never for Agriculture); production = (Ops^0.4 + Eng^0.3) x (1 + Mgmt/
+  (1.2 x prod staff)) -> ~40/20/40 Ops/Eng/Mgmt; >= 9 employees need >= 1/9 interns or energy/morale decay; sell
+  price penalty-free up to MP + quality/markup (Market-TA.I/II automate it).
 - The bridge runs as a background task of the session: start it again with `node bridge/server.mjs` (the game reconnects,
   or Options -> Remote API -> Connect after a game restart).
 - Darknet: map + crack tools exist (`tools/darknet-*.js`); Those are fine. Do continue it.
@@ -61,6 +71,8 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   read data/metrics.txt, state.txt, darknet.txt, coding-contracts.txt; refresh 5 s). Open the URL, not the file.
 - `node bridge/cli.mjs …` — talks to the bridge (control port 12526): `status | sync | ls | get <file> | ram <file>… | run <script> [-h host] [-t N] [args] | call <method> [json]`.
 - After every reset (augmentation install or new BitNode) the user types `run start.js`: it roots, starts the hacking service on the biggest rooted server (`services/batcher.js` with Formulas.exe, else `controller.js`; the controller runs start.js itself once Formulas.exe appears, and start.js kills it), metrics if home has room, then spawns `agent.js` (fits an 8 GB home). `agent.js` must be running on home. It executes `cli run` commands; for remote hosts it scp's all `.js` first.
+- In corporation BitNodes use `run start-corporation.js` instead: services/corp-status.js + agent.js only, no hacking or
+  hacking-economy home services (corp calls cost 10-20 GB each, home has 32 GB). start.js would start those again.
 - Node is at `C:\Program Files\nodejs` — prepend to PATH in shells started before the install.
 
 ## Conventions
@@ -74,7 +86,7 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 ## Layout (`src/`, synced to home)
 - `start.js`, `agent.js` — top level because the user types them by hand.
 - `lib/` shared code · `workers/` single-operation jobs (hack, grow, weaken, share), started only by the controller ·
-  `services/` long-running (`controller.js` or, with Formulas.exe, `batcher.js` (HWGW batches; planner in `lib/batch-planner.js`, preview: `tools/batch-plan.js`, log data/batcher.txt; workers `workers/batch-*.js` take an absolute landing time) on a rooted server; on home: `metrics.js`, `coding-contracts.js`, `server-buyer.js` = ns.cloud servers, buys only after TOR + BruteSSH..HTTPWorm are owned (cheaper RAM per GB) and when <10% thread slots are free, `darknet-orchestrator.js`) · `tools/` one-shots
+  `services/` long-running (`controller.js` or, with Formulas.exe, `batcher.js` (HWGW batches; planner in `lib/batch-planner.js`, preview: `tools/batch-plan.js`, log data/batcher.txt; workers `workers/batch-*.js` take an absolute landing time) on a rooted server; on home: `metrics.js`, `coding-contracts.js`, `server-buyer.js` = ns.cloud servers, buys only after TOR + BruteSSH..HTTPWorm are owned (cheaper RAM per GB) and when <10% thread slots are free, `darknet-orchestrator.js`, `corp-status.js` = corp state every 20 s -> data/corp-state.txt + data/corp-history.txt for the dashboard, via one reader script per corp call `workers/corp-read-*.js` (11.6 GB each, run one at a time)) · `tools/` one-shots
   (`root`, `path` for backdoor connect chains, `backdoor-chains` = paste-ready chain for every server still missing a backdoor (faction + company servers first; `--important`),  `kill`, `kill-all` (every script on every reachable server; `--keep-agent`), `state`, `check-grow`, `usage` = RAM and scripts per server + threads per target, `test-contract-solvers`, `debug-hack-plan`).
 - Coding contracts: `lib/contract-solvers.js` (all 30 types; `tools/describe-contract-type.js` fetches the game's description for a type). Verify with `tools/test-contract-solvers.js` (dummy contracts, results in data/contract-solver-test-results.txt) before trusting changes; `services/coding-contracts.js` on home only attempts verified types and blocks a type after one real failure. Log: data/coding-contracts.txt (readable lines via lib/log.js; logs the user reads are text, logs only scripts read stay JSON). First run: 10 solved, ~5k CyberSec rep + $50M.
 - Start the hacking service: `node bridge/cli.mjs run start.js [--rep <share fraction>]` (restart: `tools/kill.js <host> services/batcher.js` first; a new batcher adopts in-flight batches by their landing times).
