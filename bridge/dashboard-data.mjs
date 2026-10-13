@@ -18,15 +18,27 @@ export async function collectDashboardData(call) {
       return null;
     }
   };
-  const [metricsText, stateText, darknetText, contractsText] = await Promise.all(
-    ["data/metrics.txt", "data/state.txt", "data/darknet.txt", "data/coding-contracts.txt"].map(readFile));
+  const [metricsText, stateText, darknetText, contractsText, corpStateText, corpHistoryText] = await Promise.all(
+    ["data/metrics.txt", "data/state.txt", "data/darknet.txt", "data/coding-contracts.txt", "data/corp-state.txt", "data/corp-history.txt"].map(readFile));
   return {
     time: Date.now(),
     income: metricsText ? incomeFromMetrics(metricsText) : null,
     hacking: stateText ? hackingFromState(stateText) : null,
     darknet: darknetText ? darknetFromLog(darknetText) : null,
     contracts: contractsText ? contractsFromLog(contractsText) : null,
+    corporation: corpStateText ? corporationFromState(corpStateText, corpHistoryText) : null,
   };
+}
+
+/** services/corp-status.js snapshot plus the last 2 h of history (one line per 20 s). */
+function corporationFromState(stateText, historyText) {
+  let state;
+  try { state = JSON.parse(stateText); } catch { return null; }
+  const cutoff = Date.now() - INCOME_HISTORY_MINUTES * 60_000;
+  const history = (historyText ?? "").split("\n").filter(Boolean).flatMap((line) => {
+    try { return [JSON.parse(line)]; } catch { return []; }
+  }).filter((point) => point.t >= cutoff);
+  return { ...state, history };
 }
 
 /** Income per minute from the cumulative hack money; skips gaps and resets (augmentation installs). */

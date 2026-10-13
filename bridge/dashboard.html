@@ -63,6 +63,7 @@
   <span class="status" id="updated"></span>
 </header>
 <div class="grid" id="grid">
+  <div class="card wide" id="card-corp"></div>
   <div class="card wide" id="card-income"></div>
   <div class="card" id="card-hacking"></div>
   <div class="card" id="card-darknet"></div>
@@ -138,9 +139,10 @@ function logLineChart(points, color, format) {
   return { svg, geometry: { W, sx, sy } };
 }
 
-// Crosshair + tooltip: snaps to the nearest point. Remembers the pointer's position, so a hover survives the 5 s refresh.
-let incomeHoverX = null;
-function attachHover(container, points, geometry, format) {
+// Crosshair + tooltip: snaps to the nearest point. Remembers the pointer's position per chart (key), so a hover
+// survives the 5 s refresh.
+const hoverPositions = {};
+function attachHover(container, points, geometry, format, suffix, key) {
   const svgElement = container.querySelector("svg");
   const group = svgElement.querySelector(".hover"), line = svgElement.querySelector(".hover-line"), dot = svgElement.querySelector(".hover-dot");
   const tooltip = container.querySelector(".tooltip");
@@ -152,7 +154,7 @@ function attachHover(container, points, geometry, format) {
     dot.setAttribute("cx", x); dot.setAttribute("cy", y);
     group.style.display = "";
     tooltip.replaceChildren();
-    const value = document.createElement("strong"); value.textContent = format(nearest.perSecond) + "/s";
+    const value = document.createElement("strong"); value.textContent = format(nearest.perSecond) + suffix;
     const time = document.createElement("span"); time.className = "muted"; time.textContent = " at " + fmtClock(nearest.t);
     tooltip.append(value, time);
     const scale = svgElement.getBoundingClientRect().width / geometry.W;
@@ -161,9 +163,59 @@ function attachHover(container, points, geometry, format) {
   };
   const hide = () => { group.style.display = "none"; tooltip.style.display = "none"; };
   const toViewX = (event) => (event.clientX - svgElement.getBoundingClientRect().left) / svgElement.getBoundingClientRect().width * geometry.W;
-  svgElement.addEventListener("pointermove", (event) => { incomeHoverX = toViewX(event); show(incomeHoverX); });
-  svgElement.addEventListener("pointerleave", () => { incomeHoverX = null; hide(); });
-  if (incomeHoverX !== null) show(incomeHoverX);
+  svgElement.addEventListener("pointermove", (event) => { hoverPositions[key] = toViewX(event); show(hoverPositions[key]); });
+  svgElement.addEventListener("pointerleave", () => { delete hoverPositions[key]; hide(); });
+  if (hoverPositions[key] !== undefined) show(hoverPositions[key]);
+}
+
+// Corporation (services/corp-status.js, every 20 s): headline numbers, investment offer, valuation history, one row per city.
+const JOB_SHORT = { Operations: "Ops", Engineer: "Eng", Business: "Bus", Management: "Mgt", "Research & Development": "R&D", Intern: "Int" };
+function renderCorporation(corp) {
+  const card = el("card-corp");
+  if (!corp) { card.style.display = "none"; return; }
+  card.style.display = "";
+  const c = corp.corporation, offer = corp.offer;
+  const profit = c.revenue - c.expenses;
+  const ownedPercent = (100 * c.numShares / c.totalShares).toFixed(1);
+  const offerTile = offer && offer.funds > 0
+    ? tile("Investment offer", fmtMoney(offer.funds), `round ${offer.round} for ${fmtInt(offer.shares / 1e6)}M shares · you hold ${ownedPercent}%`)
+    : tile("Investment offer", "–", c.public ? "public: no more rounds" : `you hold ${ownedPercent}%`);
+  const tiles = `<div class="tiles">
+    ${tile("Valuation", fmtMoney(c.valuation))}
+    ${tile("Profit", fmtMoney(profit) + "/s", `revenue ${fmtMoney(c.revenue)}/s · expenses ${fmtMoney(c.expenses)}/s`)}
+    ${tile("Funds", fmtMoney(c.funds))}
+    ${offerTile}
+  </div>`;
+
+  const points = (corp.history || []).map((h) => ({ t: h.t, perSecond: h.valuation })).filter((p) => p.perSecond > 0);
+  const chart = points.length >= 2 ? logLineChart(points, BLUE, fmtMoney) : null;
+
+  const warehouses = new Map((corp.warehouses || []).map((w) => [w.division + "|" + w.city, w]));
+  const rows = (corp.offices || []).map((office) => {
+    const key = office.division + "|" + office.city;
+    const jobs = Object.entries(office.employeeJobs || {}).filter(([, n]) => n > 0).map(([job, n]) => `${JOB_SHORT[job] ?? job} ${n}`).join(" ");
+    const warehouse = warehouses.get(key);
+    const outputs = (corp.materials || []).filter((m) => m.division === office.division && m.city === office.city && m.productionAmount > 0)
+      .map((m) => `${esc(m.name)} ${fmtNum(m.productionAmount)}/s, sold ${fmtNum(m.actualSellAmount)}/s`).join("<br>");
+    return `<tr><td>${esc(office.division)}</td><td>${esc(office.city)}</td><td>${office.numEmployees}/${office.size} <span class="muted">${esc(jobs)}</span></td>
+      <td class="num">${Math.round(office.avgEnergy)} / ${Math.round(office.avgMorale)}</td>
+      <td class="num">${warehouse ? `${Math.round(100 * warehouse.sizeUsed / warehouse.size)}% of ${fmtNum(warehouse.size)}` : "none"}</td>
+      <td>${outputs || '<span class="muted">–</span>'}</td></tr>`;
+  }).join("");
+  const divisions = (corp.divisions || []).map((d) => `${esc(d.name)} (${esc(d.industry)}): production ×${d.productionMult.toFixed(1)}, `
+    + `${fmtNum(d.researchPoints)} research points, awareness ${fmtNum(d.awareness)}, popularity ${fmtNum(d.popularity)}, ${d.numAdVerts} adverts`).join(" · ");
+  const age = Math.round((Date.now() - corp.time) / 1000);
+
+  card.innerHTML = `<h2>Corporation: ${esc(c.name)}</h2>${tiles}
+    <div class="muted" style="font-size:12px;margin-bottom:8px">${divisions}${age > 60 ? ` · <b>data ${age} s old: is services/corp-status.js running?</b>` : ""}</div>
+    <div class="muted" style="font-size:12px;margin-bottom:4px">Valuation, last 2 h (log scale; the investment offer is 30% of it in round 1)</div>
+    <div class="chart" style="position:relative;margin-bottom:12px">${chart ? chart.svg : '<p class="muted">History starts now: one point every 20 s.</p>'}<div class="tooltip"></div></div>
+    <table><thead><tr><th>Division</th><th>City</th><th>Employees</th><th class="num">Energy / morale</th><th class="num">Warehouse</th><th>Output</th></tr></thead><tbody>${rows}</tbody></table>`;
+  if (chart) attachHover(card.querySelector(".chart"), points, chart.geometry, fmtMoney, "", "valuation");
+}
+
+function tile(label, value, sub) {
+  return `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
 }
 
 function renderIncome(income) {
@@ -180,7 +232,7 @@ function renderIncome(income) {
   card.innerHTML = `<h2>Income & hacking</h2>${tiles}<div class="muted" style="font-size:12px;margin-bottom:4px">
     Income per second, last 2 h (per-minute average, log scale)</div>
     <div class="chart" style="position:relative">${chart ? chart.svg : '<p class="muted">Not enough data yet.</p>'}<div class="tooltip"></div></div>`;
-  if (chart) attachHover(card.querySelector(".chart"), points, chart.geometry, fmtMoney);
+  if (chart) attachHover(card.querySelector(".chart"), points, chart.geometry, fmtMoney, "/s", "income");
 }
 
 function renderHacking(hacking) {
@@ -307,7 +359,7 @@ async function tick() {
     el("conn-text").textContent = data.connected ? "game connected" : "game not connected";
     el("updated").textContent = "updated " + new Date().toLocaleTimeString();
     if (data.connected) {
-      renderIncome(data.income); renderHacking(data.hacking);
+      renderCorporation(data.corporation); renderIncome(data.income); renderHacking(data.hacking);
       renderDarknet(data.darknet); renderContracts(data.contracts);
     }
     renderRepCard();
