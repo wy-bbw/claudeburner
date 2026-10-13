@@ -26,6 +26,10 @@ export async function main(ns) {
   /** @param {string} type @param {string} details */
   const report = (type, details) => ns.writePort(DARKNET_EVENTS_PORT, JSON.stringify({ type, host: here, details }));
 
+  if (!isChild && !ns.fileExists("DarkscapeNavigator.exe", "home")) {
+    ns.tprint("darknet-crawl.js needs DarkscapeNavigator.exe (buy it through TOR): every dnet call throws without it");
+    return;
+  }
   if (!isChild) {
     ns.clearPort(DARKNET_VISITED_PORT);
     // running phishers re-add themselves after their next attempt; servers that left the darknet drop out

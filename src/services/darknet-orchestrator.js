@@ -3,6 +3,7 @@ import { DARKNET_EVENTS_PORT, DARKNET_VISITED_PORT, PHISHING_STATUS_PORT } from 
 
 const CRAWLER = "workers/darknet-crawl.js";
 const LOG_FILE = "data/darknet.txt";
+const DARKNET_PROGRAM = "DarkscapeNavigator.exe";
 
 // darknet-orchestrator.js (home): starts a darknet sweep (workers/darknet-crawl.js on home) every
 // --interval-minutes, because darknet servers move, restart and appear. Each sweep reaches what the
@@ -10,17 +11,23 @@ const LOG_FILE = "data/darknet.txt";
 // Log data/darknet.txt: the crawlers' events (failed logins with their hints, caches, files found, errors) and, before
 // each new sweep, a summary of the last one: servers reached, phishers, threads, successes, karma.
 // Needs the crawler's RAM free on home at sweep time; logs and skips the sweep otherwise.
+// Waits for DarkscapeNavigator.exe (bought through TOR; without it every dnet call throws) and sweeps the
+// moment it appears, instead of at the next interval.
 /** @param {NS} ns */
 export async function main(ns) {
   ns.disableLog("ALL");
   const options = ns.flags([["interval-minutes", 5]]);
   const intervalMs = Number(options["interval-minutes"]) * 60_000;
-  let nextSweepTime = 0;
+  let nextSweepTime = 0, waitingForNavigator = false;
   /** Login problems and files already logged: they show up again in every sweep (login problems from every neighbour). */
   const alreadyLogged = new Set();
   while (true) {
     drainEvents(ns, alreadyLogged);
-    if (Date.now() >= nextSweepTime) {
+    const hasNavigator = ns.fileExists(DARKNET_PROGRAM, "home");
+    if (!hasNavigator && !waitingForNavigator) appendLog(ns, LOG_FILE, "waiting", `for ${DARKNET_PROGRAM} (buy it through TOR); sweeping as soon as it exists`);
+    if (hasNavigator && waitingForNavigator) nextSweepTime = 0; // sweep right away
+    waitingForNavigator = !hasNavigator;
+    if (hasNavigator && Date.now() >= nextSweepTime) {
       if (nextSweepTime) logSummary(ns);
       const pid = ns.exec(CRAWLER, "home");
       if (!pid) appendLog(ns, LOG_FILE, "error", `could not start ${CRAWLER} on home (needs ${ns.getScriptRam(CRAWLER, "home")} GB)`);
