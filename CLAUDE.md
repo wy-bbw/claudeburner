@@ -24,8 +24,10 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   authorized" probably gives partial feedback, but authenticate only answers 401 → look at heartbleed logs).
   AccountsManager 0-100 got 503 Service Unavailable partway through 100 tries (rate limit or server offline?).
   `services/darknet-crawler.js` is an older unfinished draft (truncated, fails tsc).
-- Company factions: a backdoor on the company's server lowers the invite threshold (company rep) by 25% (verified in game
-  2026-10-12). `tools/path.js <server>` prints the connect chain. Clarke = clarkinc (needs hacking 1153).
+- Company factions (read from the game code, v3.0.1, main.bundle.js): invite = employed at the company + 400k company rep
+  (CorpFactionRepRequirement), x0.75 = 300k with a backdoor on the company's own server (Fulcrum Technologies -> fulcrumtech,
+  not fulcrumassets). Fulcrum Secret Technologies also needs a backdoor on fulcrumassets. All company factions keep
+  membership across aug installs (keepOnInstall), so the company grind is once per BitNode. No crime/karma requirement. `tools/path.js <server>` prints the connect chain. Clarke = clarkinc (needs hacking 1153).
 - Ideas not started: install helper (aug order/cost/timing from a pasted faction list).
 - Stock traders (2026-10-12): `services/stock-trader-4s.js` (4S forecast; buy >= 0.6 ranked by (forecast-0.5)*volatility,
   sell < 0.55; 19.75 GB) and `services/stock-trader.js` (no 4S: forecast estimated from 50 ticks, buy >= 0.65, sell < 0.5,
@@ -58,7 +60,7 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 - `start.js`, `agent.js` — top level because the user types them by hand.
 - `lib/` shared code · `workers/` single-operation jobs (hack, grow, weaken, share), started only by the controller ·
   `services/` long-running (`controller.js` or, with Formulas.exe, `batcher.js` (HWGW batches; planner in `lib/batch-planner.js`, preview: `tools/batch-plan.js`, log data/batcher.txt; workers `workers/batch-*.js` take an absolute landing time) on a rooted server; on home: `metrics.js`, `coding-contracts.js`, `server-buyer.js` = ns.cloud servers, buys only after TOR + BruteSSH..HTTPWorm are owned (cheaper RAM per GB) and when <10% thread slots are free, `darknet-orchestrator.js`) · `tools/` one-shots
-  (`root`, `path` for backdoor connect chains, `backdoor-chains` = paste-ready chain for every server still missing a backdoor (faction + company servers first; `--important`),  `kill`, `state`, `check-grow`, `usage` = RAM and scripts per server + threads per target, `test-contract-solvers`, `debug-hack-plan`).
+  (`root`, `path` for backdoor connect chains, `backdoor-chains` = paste-ready chain for every server still missing a backdoor (faction + company servers first; `--important`),  `kill`, `kill-all` (every script on every reachable server; `--keep-agent`), `state`, `check-grow`, `usage` = RAM and scripts per server + threads per target, `test-contract-solvers`, `debug-hack-plan`).
 - Coding contracts: `lib/contract-solvers.js` (all 30 types; `tools/describe-contract-type.js` fetches the game's description for a type). Verify with `tools/test-contract-solvers.js` (dummy contracts, results in data/contract-solver-test-results.txt) before trusting changes; `services/coding-contracts.js` on home only attempts verified types and blocks a type after one real failure. Log: data/coding-contracts.txt (readable lines via lib/log.js; logs the user reads are text, logs only scripts read stay JSON). First run: 10 solved, ~5k CyberSec rep + $50M.
 - Start the hacking service: `node bridge/cli.mjs run start.js [--rep <share fraction>]` (restart: `tools/kill.js <host> services/batcher.js` first; a new batcher adopts in-flight batches by their landing times).
 - Use meaningful names (user rule, see ~/.claude/CLAUDE.md).
