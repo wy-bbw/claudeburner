@@ -8,16 +8,31 @@ prep the next target in parallel. Verify every model/claim with the metrics samp
 baseline vs change, marks in `marks.txt`) — formulas from memory have been wrong before.
 Lesson: every server starts at 4% of max money; low-growth targets need hours of prep (sigma-cosmetics ~5 h), n00dles ~1 min.
 
-## Status (2026-10-11, end of first session)
-- Round 3 of BitNode 1 (two augmentation installs done). Factions joined: CyberSec, NiteSec, Sector-12, Netburners,
-  The Black Hand (joined 2026-10-11, hacking ~417). NiteSec rep was the bottleneck (~4k, ~2 rep/s).
-- Income ~10–15M $/s with all port openers; home 2 TB; ~120 TB incl. cloud servers; share at 10%.
-- The bridge ran as a background task of the session: start it again with `node bridge/server.mjs` (the game reconnects).
+## Status (2026-10-13, late BitNode 1)
+- BitNode 1 near the end: 33 augmentations installed, NeuroFlux Governor level 69 (next level ~4.2M rep: x1.14 per
+  level from base 500, read from the game code). Money ~$4q, income ~$1t/s once the big targets are prepped,
+  home 8.39 PB, hacking ~1900, charisma ~2700 (darknet phishing). Money is no longer scarce; faction rep is.
+- Factions: Bachman & Associates has 150 favor = donations unlocked (rep for money: 400k rep ~ $163b at faction_rep
+  x2.45). Company rep in progress: Fulcrum (threshold 300k, both backdoors done), Clarke, ECorp. Also The Black Hand,
+  Tian Di Hui. Company factions keep membership across installs (see below).
+- Favor after install = log(cumulative rep / 25000 + 1) / log(1.02); 150 favor = 462,490 cumulative rep (matches the
+  game's favor preview). The loop that works: earn rep until the preview shows 150, install (any cheap aug, e.g. 7.5k
+  rep from a city faction; NeuroFlux is too expensive by now), then donate. The dashboard's favor panel tracks it.
+- Every install costs ~20-30 min of reduced income while the big targets are re-prepped from 4% money, plus Formulas.exe
+  ($5b) and DarkscapeNavigator.exe must be rebought (the darknet service waits for it); TIX/4S access survives.
+- Next: Daedalus (30 augs + $100b met; needs hacking 2500 -> NeuroFlux/augs bought via Bachman donations), 150 favor
+  there, donate ~$1t for The Red Pill (2.5M rep), backdoor w0r1d_d43m0n. Then BitNode plan: BN3 once (SF3.1 is enough:
+  level 3 only saves the $50b Office API + $50b Warehouse API unlocks per corp), BN4 three times (Singularity RAM
+  x16/4/1), then BN10 (sleeves). Corporation bribes: $1b corp funds per rep point, no favor needed, but only from
+  $100t corp valuation (game code). Build corp automation in BN3 in stages: status reader -> APIs -> products -> bribes.
+- The bridge runs as a background task of the session: start it again with `node bridge/server.mjs` (the game reconnects,
+  or Options -> Remote API -> Connect after a game restart).
 - Darknet: map + crack tools exist (`tools/darknet-*.js`); Those are fine. Do continue it.
   `services/darknet-orchestrator.js` (home, started by start.js) runs a sweep every 5 min: `workers/darknet-crawl.js` spreads over every
   server `lib/darknet-models.js` cracks (hint rules + model guessers), opens caches, then turns into `workers/darknet-phish.js` with all
   free RAM. Log data/darknet.txt. First run: ~13-20 servers, ~60 phishing threads; phishing pays ~$450/success (mostly charisma XP).
-  Unsolved models (log `unknown`): Factori-Os, OpenWebAccessPoint, BellaCuore (roman numeral in data, e.g. XCIX = 99).
+  Unsolved models (log `unknown`): Factori-Os, OpenWebAccessPoint, NIL, Pr0verFl0, DeepGreen. BellaCuore is solved (roman
+  numeral in data, e.g. XCIX = 99). Failed logins log the target's heartbleed logs (often feedback on the attempt).
   Adding FreshInstall_1.0 + AccountsManager_4.2 guessers took a sweep from 7-11 to 19 servers.
   Darknet files (crawler logs them as `file`): "The password for <host> contains 6 and 8" (clues for other servers),
   "Some common passwords include …" (word lists), "Remember this password: 71", and tips (NIL = "you are one who's'nt
