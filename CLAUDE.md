@@ -35,6 +35,14 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   Estate first, then Hardware + AI Cores, Robots never for Agriculture); production = (Ops^0.4 + Eng^0.3) x (1 + Mgmt/
   (1.2 x prod staff)) -> ~40/20/40 Ops/Eng/Mgmt; >= 9 employees need >= 1/9 interns or energy/morale decay; sell
   price penalty-free up to MP + quality/markup (Market-TA.I/II automate it).
+  Valuation code detail: each cycle's value uses the asset change per second, negative changes count as 0, and the offer
+  averages 10 cycles -> buy everything in one go, then wait ~10 cycles before accepting. Bonus time runs the corp ~10x.
+  Round 1 $73b, round 2 $1.5t accepted (2026-10-14; player keeps 550M of 1.5e9 shares). Divisions: "food" (Agriculture),
+  "FSAB" (Chemical), "tobacco" (Tobacco, main office Aevum 30+, 5 support offices mostly R&D).
+  Lessons: Smart Supply option for imported materials must be "leftovers" ("imports" ignores the stock: imports piled
+  up, the warehouses filled and Agriculture production fell to 40%). Research only when it costs < half the RP pool;
+  RP per office = 0.004 x sqrt(R&D output) -> Project Insight (linear) beats more R&D staff. Product effective rating =
+  min(rating, sqrt(rating) x input quality): with Plants quality ~50, input quality is not the bottleneck below ~2500.
 - The bridge runs as a background task of the session: start it again with `node bridge/server.mjs` (the game reconnects,
   or Options -> Remote API -> Connect after a game restart).
 - Darknet: map + crack tools exist (`tools/darknet-*.js`); Those are fine. Do continue it.
@@ -71,8 +79,15 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   read data/metrics.txt, state.txt, darknet.txt, coding-contracts.txt; refresh 5 s). Open the URL, not the file.
 - `node bridge/cli.mjs …` — talks to the bridge (control port 12526): `status | sync | ls | get <file> | ram <file>… | run <script> [-h host] [-t N] [args] | call <method> [json]`.
 - After every reset (augmentation install or new BitNode) the user types `run start.js`: it roots, starts the hacking service on the biggest rooted server (`services/batcher.js` with Formulas.exe, else `controller.js`; the controller runs start.js itself once Formulas.exe appears, and start.js kills it), metrics if home has room, then spawns `agent.js` (fits an 8 GB home). `agent.js` must be running on home. It executes `cli run` commands; for remote hosts it scp's all `.js` first.
-- In corporation BitNodes use `run start-corporation.js` instead: services/corp-status.js + agent.js only, no hacking or
-  hacking-economy home services (corp calls cost 10-20 GB each, home has 32 GB). start.js would start those again.
+- In corporation BitNodes use `run start-corporation.js` instead: services/corp-status.js + services/corp-manager.js +
+  agent.js only, no hacking or hacking-economy home services (corp calls cost 10-20 GB each, home has 32 GB). start.js
+  would start those again. Corp scripts: one corporation function per worker script (`workers/corp-read-*.js` 11.6 GB,
+  `workers/corp-do-<action>.js` 21.6 GB, taking a JSON list of calls), run one at a time via `lib/corp-scripts.js`
+  (waits for free RAM). corp-manager.js: products (develop, discontinue the worst, sell), custom Market-TA.II pricing
+  for products and materials (`lib/corp-pricing.js`: C = sold x (price-MP)^2 from a cycle with stock left, price =
+  MP + sqrt(C/supply); log data/corp-manager.txt, prices data/corp-prices.txt), Wilson + Advert (`--hold-upgrades`
+  before accepting an offer). `tools/corp-exports.js` sets the Agriculture/Chemical/Tobacco exports + Smart Supply
+  options; a tool's 21.6 GB worker does not fit next to corp-manager: kill corp-manager, run the tool, restart.
 - Node is at `C:\Program Files\nodejs` — prepend to PATH in shells started before the install.
 
 ## Conventions

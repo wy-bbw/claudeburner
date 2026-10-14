@@ -6,3 +6,4 @@ type Person = import("./NetscriptDefinitions").Person;
 type ProcessInfo = import("./NetscriptDefinitions").ProcessInfo;
 type DarknetResult = import("./NetscriptDefinitions").DarknetResult;
 type CityName = import("./NetscriptDefinitions").CityName;
+type CorpResearchName = import("./NetscriptDefinitions").CorpResearchName;

@@ -1,6 +1,7 @@
 const AGENT = "agent.js";
-// Corporation services on home, started in this order. Each reader of corp-status.js needs ~11.6 GB while it runs.
-const CORPORATION_SERVICES = ["services/corp-status.js"];
+// Corporation services on home, started in this order. Their worker scripts (11.6 GB readers, 21.6 GB actions) take
+// turns on the remaining RAM (lib/corp-scripts.js). corp-manager.js prices from the start, its product work waits until the tobacco division exists.
+const CORPORATION_SERVICES = ["services/corp-status.js", "services/corp-manager.js"];
 
 // start-corporation.js: the start for corporation BitNodes (BN3), instead of start.js. Starts the corporation services
 // on home and hands over to agent.js, but no hacking service and no hacking-economy home services (server-buyer,
