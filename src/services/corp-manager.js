@@ -9,6 +9,8 @@ const STATE_FILE = "data/corp-state.txt";
 const LOG_FILE = "data/corp-manager.txt";
 const PRICES_FILE = "data/corp-prices.txt";
 const REQUESTS_FILE = "data/corp-requests.txt";
+// Which prices are calibrated (lib/corp-pricing.js memory), kept across restarts: uncalibrated prices probe x3.
+const PRICE_MEMORY_FILE = "data/corp-price-memory.txt";
 const INTERVAL_MS = 5_000;
 const WILSON = "Wilson Analytics";
 // Upgrade cost = base price x price multiplier ^ level (game code).
@@ -64,7 +66,7 @@ export async function main(ns) {
   /** Products that already have Market-TA.II turned on (not visible in the product data). */
   const marketTa2Products = new Set();
   /** @type {Map<string, {calibrated?: boolean}>} pricing memory per item and city */
-  const priceMemory = new Map();
+  const priceMemory = new Map(Object.entries(readJson(ns, PRICE_MEMORY_FILE) ?? {}));
   let lastStateTime = 0, lastPriceChange = 0, lastRequestTime = 0, lastWaiting = "";
   const log = (/** @type {string} */ event, /** @type {string} */ details) => appendLog(ns, LOG_FILE, event, details);
   const waiting = (/** @type {string} */ reason) => {
@@ -116,6 +118,7 @@ export async function main(ns) {
         material.productionAmount > 0);
       const pricing = priceOrders(productEntries, materialEntries, priceMemory);
       writePrices(ns, pricing.lines);
+      ns.write(PRICE_MEMORY_FILE, JSON.stringify(Object.fromEntries(priceMemory)), "w");
       if (pricing.productOrders.length) await report(ns, log, "sell-product", pricing.productOrders, false);
       if (pricing.materialOrders.length) await report(ns, log, "sell-material", pricing.materialOrders, false);
       if (pricing.productOrders.length || pricing.materialOrders.length) {

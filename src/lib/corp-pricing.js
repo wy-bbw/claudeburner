@@ -10,6 +10,9 @@ const FIRST_DELTA_OF_MARKET_PRICE = 0.01;
 // Probe steps while everything sells out. Products: far above MP (hundreds of x) and their demand keeps growing with
 // Advert, so bigger steps; one unsold cycle of a product costs little. Materials: careful (a full warehouse stops production).
 const PROBE_FACTORS = { product: { uncalibrated: 3, calibrated: 1.15 }, material: { uncalibrated: 1.5, calibrated: 1.05 } };
+// Leftover stock is sold off over this many cycles: one for materials (warehouse space), five for products (draining
+// in one cycle would push the price down hard after every overshoot).
+const DRAIN_CYCLES = { product: 5, material: 1 };
 const SOLD_OUT_TOLERANCE = 0.01;
 
 /** "MP" -> 0, "MP+12.5" -> 12.5; anything else (a price set by hand) -> null: leave it alone. @param {unknown} price */
@@ -50,6 +53,7 @@ export function nextPriceDelta(item, memory) {
   if (delta <= 0) return { delta: 0, reason: "stock left even at MP" };
   memory.calibrated = true;
   const salesConstant = sold * delta ** 2;
-  const target = Math.max(supply, sold) + leftover / 10;
-  return { delta: Math.sqrt(salesConstant / target), reason: "stock left: price for supply + stock/10" };
+  const drainCycles = DRAIN_CYCLES[item.kind ?? "material"];
+  const target = Math.max(supply, sold) + leftover / (10 * drainCycles);
+  return { delta: Math.sqrt(salesConstant / target), reason: `stock left: price for supply + stock over ${drainCycles} cycle(s)` };
 }
