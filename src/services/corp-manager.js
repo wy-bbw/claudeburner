@@ -1,7 +1,7 @@
 import { appendLog, formatTime } from "lib/log.js";
 import { runAction, runReader } from "lib/corp-scripts.js";
 import { BOOST_MATERIALS, planBoosts } from "lib/corp-boosts.js";
-import { planUpgrades } from "lib/corp-upgrades.js";
+import { AUTO_UPGRADES, planUpgrades } from "lib/corp-upgrades.js";
 import { JOBS, jobSplit, largestAffordableSize, officeUpgradeCost } from "lib/corp-offices.js";
 import { formatPrice, nextPriceDelta, parsePriceDelta } from "lib/corp-pricing.js";
 
@@ -48,6 +48,8 @@ const TOP_UP_MARGIN = 2;
 // - Requests queued by tools in data/corp-requests.txt (JSON lines), one per round so each sees a fresh state:
 //   tools/corp-boosts.js (warehouse levels + optimal boost materials), tools/corp-upgrades.js (corporation upgrades),
 //   tools/corp-office.js (office size, hiring, job split).
+// --reinvest-minutes N queues upgrades (20% of funds), main office (15%), all offices (10%) and boosts (10%) every N
+// minutes (each request spends its share of the funds when it runs).
 // --hold-upgrades stops Wilson/Advert purchases (e.g. while waiting for an investment offer: spending lowers it).
 // Usage: run services/corp-manager.js [--division tobacco] [--city Aevum]
 /** @param {NS} ns */
@@ -61,13 +63,14 @@ export async function main(ns) {
     ["advert-fraction", 0.1],
     ["hold-upgrades", false],
     ["fixed-material-prices", false],
+    ["reinvest-minutes", 0],
   ]);
   const division = String(flags.division), mainCity = /** @type {CityName} */ (String(flags.city));
   /** Products that already have Market-TA.II turned on (not visible in the product data). */
   const marketTa2Products = new Set();
   /** @type {Map<string, {calibrated?: boolean}>} pricing memory per item and city */
   const priceMemory = new Map(Object.entries(readJson(ns, PRICE_MEMORY_FILE) ?? {}));
-  let lastStateTime = 0, lastPriceChange = 0, lastRequestTime = 0, lastWaiting = "";
+  let lastStateTime = 0, lastPriceChange = 0, lastRequestTime = 0, lastReinvest = Date.now(), lastWaiting = "";
   const log = (/** @type {string} */ event, /** @type {string} */ details) => appendLog(ns, LOG_FILE, event, details);
   const waiting = (/** @type {string} */ reason) => {
     if (reason !== lastWaiting) log("waiting", reason);
@@ -81,8 +84,24 @@ export async function main(ns) {
     if (!state || state.time <= lastStateTime) continue;
     let acted = false;
 
+    // --reinvest-minutes: queue the growth requests regularly (each spends a share of the funds at that moment).
+    const reinvestMinutes = Number(flags["reinvest-minutes"]);
+    if (reinvestMinutes > 0 && Date.now() - lastReinvest > reinvestMinutes * 60_000 && !ns.read(REQUESTS_FILE).trim()) {
+      lastReinvest = Date.now();
+      const time = Date.now();
+      const reinvest = [
+        { type: "upgrades", names: AUTO_UPGRADES, budgetFraction: 0.2, time },
+        { type: "office", division, city: mainCity, size: 0, budgetFraction: 0.15, jobs: null, time },
+        { type: "office", division, city: "all", size: 0, budgetFraction: 0.1, jobs: null, time },
+        { type: "boosts", division, budgetFraction: 0.1, fill: 0.6, time },
+      ];
+      ns.write(REQUESTS_FILE, reinvest.map((request) => JSON.stringify(request) + "\n").join(""), "a");
+      log("reinvest", "queued upgrades 20%, main office 15%, all offices 10%, boosts 10% of funds");
+    }
+
     // Requests from tools (they only queue a line: the workers need the RAM a running tool would take).
-    const requests = ns.read(REQUESTS_FILE).split("\n").filter((line) => line.trim());
+    // Only on a state read entirely after the previous request: a request must see what the last one changed.
+    const requests = (state.readStartTime ?? 0) > lastRequestTime ? ns.read(REQUESTS_FILE).split("\n").filter((line) => line.trim()) : [];
     if (requests.length) {
       ns.write(REQUESTS_FILE, requests.slice(1).map((line) => line + "\n").join(""), "w");
       let request = null;
