@@ -7,8 +7,9 @@
 
 // Start low: a material's markup limit (quality / markup) is often only a few % of MP, and one unsold cycle can fill a warehouse.
 const FIRST_DELTA_OF_MARKET_PRICE = 0.01;
-const PROBE_FACTOR_UNCALIBRATED = 1.5;
-const PROBE_FACTOR_CALIBRATED = 1.05;
+// Probe steps while everything sells out. Products: far above MP (hundreds of x) and their demand keeps growing with
+// Advert, so bigger steps; one unsold cycle of a product costs little. Materials: careful (a full warehouse stops production).
+const PROBE_FACTORS = { product: { uncalibrated: 3, calibrated: 1.15 }, material: { uncalibrated: 1.5, calibrated: 1.05 } };
 const SOLD_OUT_TOLERANCE = 0.01;
 
 /** "MP" -> 0, "MP+12.5" -> 12.5; anything else (a price set by hand) -> null: leave it alone. @param {unknown} price */
@@ -26,7 +27,8 @@ export function formatPrice(delta) {
 
 /**
  * The next price above MP for one item in one city.
- * @param {{marketPrice: number, delta: number, sold: number, supply: number, leftover: number, startDelta?: number}} item
+ * @param {{marketPrice: number, delta: number, sold: number, supply: number, leftover: number, startDelta?: number,
+ *   kind?: "product" | "material"}} item
  *   sold and supply per second over the last cycle (supply = what will come in for sale), leftover = units stored
  *   right after the last sale; startDelta = the least to jump to while everything sells out (the price of the best
  *   older product in the same city: a newer product is better, so it sells at least as well at that price)
@@ -39,7 +41,8 @@ export function nextPriceDelta(item, memory) {
   if (offered <= 0) return { delta, reason: "nothing to sell" };
   const soldOut = leftover <= Math.max(1, SOLD_OUT_TOLERANCE * offered * 10);
   if (soldOut) {
-    const factor = memory.calibrated ? PROBE_FACTOR_CALIBRATED : PROBE_FACTOR_UNCALIBRATED;
+    const factors = PROBE_FACTORS[item.kind ?? "material"];
+    const factor = memory.calibrated ? factors.calibrated : factors.uncalibrated;
     const probedDelta = delta <= 0 ? FIRST_DELTA_OF_MARKET_PRICE * marketPrice : delta * factor;
     if ((item.startDelta ?? 0) > probedDelta) return { delta: item.startDelta ?? 0, reason: "sold out: up to the best older product's price" };
     return { delta: probedDelta, reason: delta <= 0 ? "sold out at MP: first markup" : "sold out: probing higher" };

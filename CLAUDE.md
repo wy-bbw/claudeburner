@@ -87,7 +87,16 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   for products and materials (`lib/corp-pricing.js`: C = sold x (price-MP)^2 from a cycle with stock left, price =
   MP + sqrt(C/supply); log data/corp-manager.txt, prices data/corp-prices.txt), Wilson + Advert (`--hold-upgrades`
   before accepting an offer). `tools/corp-exports.js` sets the Agriculture/Chemical/Tobacco exports + Smart Supply
-  options; a tool's 21.6 GB worker does not fit next to corp-manager: kill corp-manager, run the tool, restart.
+  options; a tool's 21.6 GB worker does not fit next to corp-manager on 32 GB: kill corp-manager, run the tool, restart.
+  Request tools (1.6 GB, queue a JSON line in data/corp-requests.txt; corp-manager runs one per round on a state read
+  after the previous request, `--dry-run` logs the plan): `tools/corp-upgrades.js --budget-fraction f` (Smart
+  Factories/Storage, employee upgrades, Project Insight; cheapest level first), `tools/corp-boosts.js --division d
+  --budget-fraction f [--fill 0.6]` (highest warehouse level + Lagrange boosts within budget), `tools/corp-office.js
+  --division d --city c|all --size n|--budget-fraction f [--jobs "Operations:4,Engineer:22,..."]` (grow, hire,
+  ceil(size/9) interns first, split). The manager also buys tea and throws parties below max energy/morale - 2.
+  The game silently ignores office/warehouse upgrades it cannot afford (workers then report ok).
+- State 2026-10-14 evening: round 4 accepted, public, Shady Accounting, dividend 1%, profit ~$25-30B/s, home 512 GB.
+  Next: one big corporation script (enough RAM to call the API directly instead of workers + request queue).
 - Node is at `C:\Program Files\nodejs` — prepend to PATH in shells started before the install.
 
 ## Conventions

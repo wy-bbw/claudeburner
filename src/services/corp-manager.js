@@ -2,6 +2,7 @@ import { appendLog, formatTime } from "lib/log.js";
 import { runAction, runReader } from "lib/corp-scripts.js";
 import { BOOST_MATERIALS, planBoosts } from "lib/corp-boosts.js";
 import { planUpgrades } from "lib/corp-upgrades.js";
+import { JOBS, jobSplit, largestAffordableSize, officeUpgradeCost } from "lib/corp-offices.js";
 import { formatPrice, nextPriceDelta, parsePriceDelta } from "lib/corp-pricing.js";
 
 const STATE_FILE = "data/corp-state.txt";
@@ -14,6 +15,8 @@ const WILSON = "Wilson Analytics";
 const WILSON_BASE_PRICE = 4e9, WILSON_PRICE_MULT = 2;
 const ADVERT_BASE_PRICE = 1e9, ADVERT_PRICE_MULT = 1.06;
 const MAX_ADVERTS_PER_ROUND = 20;
+// Tea / party when energy or morale is this far below the maximum.
+const TOP_UP_MARGIN = 2;
 
 /**
  * @typedef {{division: string, city: CityName, name: string, developmentProgress: number, rating: number,
@@ -22,6 +25,8 @@ const MAX_ADVERTS_PER_ROUND = 20;
  * @typedef {{division: string, city: CityName, name: string, stored: number, productionAmount: number,
  *   actualSellAmount: number, marketPrice: number, desiredSellAmount?: string | number,
  *   desiredSellPrice?: string | number}} MaterialData (workers/corp-read-materials.js)
+ * @typedef {{division: string, city: CityName, numEmployees: number, avgEnergy: number, maxEnergy: number,
+ *   avgMorale: number, maxMorale: number}} OfficeData (workers/corp-read-offices.js)
  */
 
 // corp-manager.js (home): runs the corporation's routine work, the round 3+ loop of the corporation guide:
@@ -31,13 +36,16 @@ const MAX_ADVERTS_PER_ROUND = 20;
 // - Prices like Market-TA.II for every product and every produced material that sells "MAX" at "MP" or "MP+x"
 //   (lib/corp-pricing.js), without the 70k RP research. Prices set by hand are left alone. Once Market-TA.II is
 //   researched, products use the game's own. --fixed-material-prices leaves materials alone.
+// - Energy and morale: tea and a party for every office more than 2 below the maximum (what the AutoBrew and
+//   AutoPartyManager research do, without spending RP).
 // - Wilson Analytics when it costs <= --wilson-fraction of funds, then Advert levels for --division while each costs
 //   <= --advert-fraction of funds (Wilson first: it multiplies every later Advert).
 // Decisions use data/corp-state.txt (services/corp-status.js, every 20 s); after acting it waits for a newer state.
 // Every action is its own 20 GB worker (workers/corp-do-*.js). Log: data/corp-manager.txt; current prices:
 // data/corp-prices.txt (rewritten every pricing round).
 // - Requests queued by tools in data/corp-requests.txt (JSON lines), one per round so each sees a fresh state:
-//   tools/corp-boosts.js (warehouse levels + optimal boost materials), tools/corp-upgrades.js (corporation upgrades).
+//   tools/corp-boosts.js (warehouse levels + optimal boost materials), tools/corp-upgrades.js (corporation upgrades),
+//   tools/corp-office.js (office size, hiring, job split).
 // --hold-upgrades stops Wilson/Advert purchases (e.g. while waiting for an investment offer: spending lowers it).
 // Usage: run services/corp-manager.js [--division tobacco] [--city Aevum]
 /** @param {NS} ns */
@@ -57,7 +65,7 @@ export async function main(ns) {
   const marketTa2Products = new Set();
   /** @type {Map<string, {calibrated?: boolean}>} pricing memory per item and city */
   const priceMemory = new Map();
-  let lastStateTime = 0, lastPriceChange = 0, lastWaiting = "";
+  let lastStateTime = 0, lastPriceChange = 0, lastRequestTime = 0, lastWaiting = "";
   const log = (/** @type {string} */ event, /** @type {string} */ details) => appendLog(ns, LOG_FILE, event, details);
   const waiting = (/** @type {string} */ reason) => {
     if (reason !== lastWaiting) log("waiting", reason);
@@ -79,9 +87,22 @@ export async function main(ns) {
       try { request = JSON.parse(requests[0]); } catch { log("failed", `unreadable request ${requests[0]}`); }
       if (request?.type === "boosts") await buyBoosts(ns, log, state, request);
       else if (request?.type === "upgrades") await buyUpgrades(ns, log, state, request);
+      else if (request?.type === "office") await growOffices(ns, log, state, request);
       else if (request) log("failed", `unknown request ${JSON.stringify(request)}`);
+      lastRequestTime = Date.now();
       acted = true;
     }
+
+    // Energy and morale (production is multiplied by both): tea and a party sized to bring morale back to the maximum.
+    const tired = (state.offices ?? []).filter((/** @type {OfficeData} */ office) => office.numEmployees > 0 && office.avgEnergy < office.maxEnergy - TOP_UP_MARGIN);
+    const unhappy = (state.offices ?? []).filter((/** @type {OfficeData} */ office) => office.numEmployees > 0 && office.avgMorale < office.maxMorale - TOP_UP_MARGIN);
+    if (tired.length) await report(ns, log, "buy-tea", tired.map((/** @type {OfficeData} */ office) => [office.division, office.city]), false);
+    if (unhappy.length) {
+      // throwParty: morale = (morale + 10 * (m - 1)) * m with m = 1 + costPerEmployee / 1e7; aim for m = max / morale.
+      await report(ns, log, "throw-party", unhappy.map((/** @type {OfficeData} */ office) =>
+        [office.division, office.city, Math.ceil((office.maxMorale / office.avgMorale - 1) * 1e7)]), false);
+    }
+    if (tired.length || unhappy.length) acted = true;
 
     // Prices: only judge a price on sales made after it was set (the readers wait for a SALE after readStartTime).
     if ((state.readStartTime ?? 0) > lastPriceChange) {
@@ -179,10 +200,10 @@ function priceOrders(products, materials, memory) {
   /** @type {string[]} */
   const lines = [];
   const items = [
-    ...products.map((product) => ({ kind: "product", entry: product, marketPrice: product.productionCost, supply: product.productionAmount,
+    ...products.map((product) => ({ kind: /** @type {const} */ ("product"), entry: product, marketPrice: product.productionCost, supply: product.productionAmount,
       startDelta: bestOlderPrice(products, product) })),
     // Exports leave before the sale: for materials, what was sold is the best guess of the supply.
-    ...materials.map((material) => ({ kind: "material", entry: material, marketPrice: material.marketPrice, supply: material.actualSellAmount,
+    ...materials.map((material) => ({ kind: /** @type {const} */ ("material"), entry: material, marketPrice: material.marketPrice, supply: material.actualSellAmount,
       startDelta: undefined })),
   ];
   for (const { kind, entry, marketPrice, supply, startDelta } of items) {
@@ -191,7 +212,7 @@ function priceOrders(products, materials, memory) {
     if (delta === null) continue;
     const key = `${entry.division}/${entry.city}/${entry.name}`;
     if (!memory.has(key)) memory.set(key, {});
-    const next = nextPriceDelta({ marketPrice, delta, sold: entry.actualSellAmount, supply, leftover: entry.stored, startDelta },
+    const next = nextPriceDelta({ marketPrice, delta, sold: entry.actualSellAmount, supply, leftover: entry.stored, startDelta, kind },
       /** @type {{calibrated?: boolean}} */ (memory.get(key)));
     const price = formatPrice(next.delta);
     lines.push(`${key.padEnd(34)} ${price.padEnd(14)} = ${((marketPrice + next.delta) / marketPrice).toFixed(3)} x MP`
@@ -231,6 +252,47 @@ function readJson(ns, file) {
   } catch {
     return null;
   }
+}
+
+/**
+ * tools/corp-office.js request: grow offices to a size (or what a budget buys), hire up to it and split the jobs.
+ * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
+ * @param {{division: string, city: string, size: number, budgetFraction: number, jobs: Record<string, number> | null,
+ *   dryRun?: boolean}} request
+ */
+async function growOffices(ns, log, state, request) {
+  /** @type {{division: string, city: CityName, size: number, numEmployees: number, employeeJobs: Record<string, number>}[]} */
+  const offices = state.offices.filter((/** @type {{division: string, city: string}} */ office) =>
+    office.division === request.division && (request.city === "all" || office.city === request.city));
+  if (!offices.length) { log("failed", `office: no office of ${request.division} in ${request.city}`); return; }
+  const budgetPerOffice = state.corporation.funds * request.budgetFraction / offices.length;
+  const upgrades = [], hires = [], assignments = [], lines = [];
+  let cost = 0;
+  for (const office of offices) {
+    const size = request.size ? Math.max(office.size, request.size) : largestAffordableSize(office.size, budgetPerOffice);
+    const currentWeights = Object.fromEntries(JOBS.map((job) => [job, office.employeeJobs[job] ?? 0]));
+    const weights = request.jobs ?? (JOBS.some((job) => currentWeights[job] > 0)
+      ? currentWeights : { Operations: 1, Engineer: 1, Business: 1, Management: 1 });
+    const split = jobSplit(size, weights);
+    const upgradeCost = size > office.size ? officeUpgradeCost(office.size, size - office.size) : 0;
+    cost += upgradeCost;
+    if (size > office.size) upgrades.push([request.division, office.city, size - office.size]);
+    for (let hire = office.numEmployees; hire < size; hire++) hires.push([request.division, office.city, "Unassigned"]);
+    // Free everyone first, then assign (each assignment needs enough unassigned employees). Interns first: below
+    // 1/9 interns energy and morale decay, so if hiring fell short, a regular job comes up short instead.
+    for (const job of ["Intern", ...JOBS]) assignments.push([request.division, office.city, job, 0]);
+    for (const job of ["Intern", ...JOBS]) if (split[job]) assignments.push([request.division, office.city, job, split[job]]);
+    lines.push(`${office.city}: ${office.size} -> ${size} ($${(upgradeCost / 1e9).toFixed(1)}b), ${JSON.stringify(split)}`);
+  }
+  if (request.dryRun) {
+    log("plan", `${request.division} offices for $${(cost / 1e9).toFixed(1)}b:`);
+    for (const line of lines) log("plan", `  ${line}`);
+    return;
+  }
+  if (upgrades.length) await report(ns, log, "upgrade-office-size", upgrades);
+  if (hires.length) await report(ns, log, "hire-employee", hires, false);
+  await report(ns, log, "set-job-assignment", assignments, false);
+  log("office", `${request.division}: $${(cost / 1e9).toFixed(1)}b, ${hires.length} hired; ${lines.join("; ")}`);
 }
 
 /**
