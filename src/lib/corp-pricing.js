@@ -26,9 +26,10 @@ export function formatPrice(delta) {
 
 /**
  * The next price above MP for one item in one city.
- * @param {{marketPrice: number, delta: number, sold: number, supply: number, leftover: number}} item
+ * @param {{marketPrice: number, delta: number, sold: number, supply: number, leftover: number, startDelta?: number}} item
  *   sold and supply per second over the last cycle (supply = what will come in for sale), leftover = units stored
- *   right after the last sale
+ *   right after the last sale; startDelta = the least to jump to while everything sells out (the price of the best
+ *   older product in the same city: a newer product is better, so it sells at least as well at that price)
  * @param {{calibrated?: boolean}} memory per item, kept between calls
  * @returns {{delta: number, reason: string}}
  */
@@ -38,9 +39,10 @@ export function nextPriceDelta(item, memory) {
   if (offered <= 0) return { delta, reason: "nothing to sell" };
   const soldOut = leftover <= Math.max(1, SOLD_OUT_TOLERANCE * offered * 10);
   if (soldOut) {
-    if (delta <= 0) return { delta: FIRST_DELTA_OF_MARKET_PRICE * marketPrice, reason: "sold out at MP: first markup" };
     const factor = memory.calibrated ? PROBE_FACTOR_CALIBRATED : PROBE_FACTOR_UNCALIBRATED;
-    return { delta: delta * factor, reason: "sold out: probing higher" };
+    const probedDelta = delta <= 0 ? FIRST_DELTA_OF_MARKET_PRICE * marketPrice : delta * factor;
+    if ((item.startDelta ?? 0) > probedDelta) return { delta: item.startDelta ?? 0, reason: "sold out: up to the best older product's price" };
+    return { delta: probedDelta, reason: delta <= 0 ? "sold out at MP: first markup" : "sold out: probing higher" };
   }
   if (delta <= 0) return { delta: 0, reason: "stock left even at MP" };
   memory.calibrated = true;

@@ -1,10 +1,13 @@
 import { appendLog, formatTime } from "lib/log.js";
-import { runAction } from "lib/corp-scripts.js";
+import { runAction, runReader } from "lib/corp-scripts.js";
+import { BOOST_MATERIALS, planBoosts } from "lib/corp-boosts.js";
+import { planUpgrades } from "lib/corp-upgrades.js";
 import { formatPrice, nextPriceDelta, parsePriceDelta } from "lib/corp-pricing.js";
 
 const STATE_FILE = "data/corp-state.txt";
 const LOG_FILE = "data/corp-manager.txt";
 const PRICES_FILE = "data/corp-prices.txt";
+const REQUESTS_FILE = "data/corp-requests.txt";
 const INTERVAL_MS = 5_000;
 const WILSON = "Wilson Analytics";
 // Upgrade cost = base price x price multiplier ^ level (game code).
@@ -32,7 +35,9 @@ const MAX_ADVERTS_PER_ROUND = 20;
 //   <= --advert-fraction of funds (Wilson first: it multiplies every later Advert).
 // Decisions use data/corp-state.txt (services/corp-status.js, every 20 s); after acting it waits for a newer state.
 // Every action is its own 20 GB worker (workers/corp-do-*.js). Log: data/corp-manager.txt; current prices:
-// data/corp-prices.txt.
+// data/corp-prices.txt (rewritten every pricing round).
+// - Requests queued by tools in data/corp-requests.txt (JSON lines), one per round so each sees a fresh state:
+//   tools/corp-boosts.js (warehouse levels + optimal boost materials), tools/corp-upgrades.js (corporation upgrades).
 // --hold-upgrades stops Wilson/Advert purchases (e.g. while waiting for an investment offer: spending lowers it).
 // Usage: run services/corp-manager.js [--division tobacco] [--city Aevum]
 /** @param {NS} ns */
@@ -58,13 +63,25 @@ export async function main(ns) {
     if (reason !== lastWaiting) log("waiting", reason);
     lastWaiting = reason;
   };
-  log("start", `division ${division}, main city ${mainCity}`);
+  log("start", `division ${division}, main city ${mainCity}, flags ${JSON.stringify(ns.args)}`);
 
   while (true) {
     await ns.sleep(INTERVAL_MS);
     const state = readState(ns);
     if (!state || state.time <= lastStateTime) continue;
     let acted = false;
+
+    // Requests from tools (they only queue a line: the workers need the RAM a running tool would take).
+    const requests = ns.read(REQUESTS_FILE).split("\n").filter((line) => line.trim());
+    if (requests.length) {
+      ns.write(REQUESTS_FILE, requests.slice(1).map((line) => line + "\n").join(""), "w");
+      let request = null;
+      try { request = JSON.parse(requests[0]); } catch { log("failed", `unreadable request ${requests[0]}`); }
+      if (request?.type === "boosts") await buyBoosts(ns, log, state, request);
+      else if (request?.type === "upgrades") await buyUpgrades(ns, log, state, request);
+      else if (request) log("failed", `unknown request ${JSON.stringify(request)}`);
+      acted = true;
+    }
 
     // Prices: only judge a price on sales made after it was set (the readers wait for a SALE after readStartTime).
     if ((state.readStartTime ?? 0) > lastPriceChange) {
@@ -162,17 +179,19 @@ function priceOrders(products, materials, memory) {
   /** @type {string[]} */
   const lines = [];
   const items = [
-    ...products.map((product) => ({ kind: "product", entry: product, marketPrice: product.productionCost, supply: product.productionAmount })),
+    ...products.map((product) => ({ kind: "product", entry: product, marketPrice: product.productionCost, supply: product.productionAmount,
+      startDelta: bestOlderPrice(products, product) })),
     // Exports leave before the sale: for materials, what was sold is the best guess of the supply.
-    ...materials.map((material) => ({ kind: "material", entry: material, marketPrice: material.marketPrice, supply: material.actualSellAmount })),
+    ...materials.map((material) => ({ kind: "material", entry: material, marketPrice: material.marketPrice, supply: material.actualSellAmount,
+      startDelta: undefined })),
   ];
-  for (const { kind, entry, marketPrice, supply } of items) {
+  for (const { kind, entry, marketPrice, supply, startDelta } of items) {
     if (String(entry.desiredSellAmount) !== "MAX" || marketPrice <= 0) continue;
     const delta = parsePriceDelta(entry.desiredSellPrice);
     if (delta === null) continue;
     const key = `${entry.division}/${entry.city}/${entry.name}`;
     if (!memory.has(key)) memory.set(key, {});
-    const next = nextPriceDelta({ marketPrice, delta, sold: entry.actualSellAmount, supply, leftover: entry.stored },
+    const next = nextPriceDelta({ marketPrice, delta, sold: entry.actualSellAmount, supply, leftover: entry.stored, startDelta },
       /** @type {{calibrated?: boolean}} */ (memory.get(key)));
     const price = formatPrice(next.delta);
     lines.push(`${key.padEnd(34)} ${price.padEnd(14)} = ${((marketPrice + next.delta) / marketPrice).toFixed(3)} x MP`
@@ -184,6 +203,17 @@ function priceOrders(products, materials, memory) {
   return { productOrders, materialOrders, lines };
 }
 
+/**
+ * The highest price above MP among the products of the same division and city with a lower rating: a new product
+ * (higher rating) sells at least as well there, so it can start at that price instead of probing up from MP.
+ * @param {ProductData[]} products @param {ProductData} product
+ */
+function bestOlderPrice(products, product) {
+  const older = products.filter((other) => other.division === product.division && other.city === product.city
+    && other.name !== product.name && other.rating <= product.rating);
+  return Math.max(0, ...older.map((other) => parsePriceDelta(other.desiredSellPrice) ?? 0));
+}
+
 /** @param {NS} ns @param {string[]} lines */
 function writePrices(ns, lines) {
   if (lines.length) ns.write(PRICES_FILE, `${formatTime()}  new prices (item, price, sales, reason):\n${lines.join("\n")}\n`, "w");
@@ -191,11 +221,67 @@ function writePrices(ns, lines) {
 
 /** @param {NS} ns */
 function readState(ns) {
+  return readJson(ns, STATE_FILE);
+}
+
+/** @param {NS} ns @param {string} file */
+function readJson(ns, file) {
   try {
-    return JSON.parse(ns.read(STATE_FILE));
+    return JSON.parse(ns.read(file));
   } catch {
     return null;
   }
+}
+
+/**
+ * tools/corp-upgrades.js request: corporation upgrades for a share of funds, cheapest next level first.
+ * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
+ * @param {{names: string[], budgetFraction: number, dryRun?: boolean}} request
+ */
+async function buyUpgrades(ns, log, state, request) {
+  const budget = state.corporation.funds * request.budgetFraction;
+  const plan = planUpgrades(state.upgrades ?? {}, request.names, budget);
+  const summary = Object.entries(plan.levels).map(([name, levels]) => `${name} +${levels} (to ${(state.upgrades?.[name] ?? 0) + levels})`).join(", ");
+  if (request.dryRun) { log("plan", `upgrades for ${(plan.cost / 1e9).toFixed(1)}b of ${(budget / 1e9).toFixed(1)}b: ${summary || "nothing affordable"}`); return; }
+  const calls = Object.entries(plan.levels).flatMap(([name, levels]) => Array.from({ length: levels }, () => [name]));
+  if (calls.length) await report(ns, log, "level-upgrade", calls, false);
+  log("upgrades", `${(plan.cost / 1e9).toFixed(1)}b of ${(budget / 1e9).toFixed(1)}b: ${summary || "nothing affordable"}`);
+}
+
+/**
+ * tools/corp-boosts.js request: warehouse levels + optimal boost materials for one division (lib/corp-boosts.js).
+ * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
+ * @param {{division: string, budgetFraction: number, fill: number, dryRun?: boolean}} request
+ */
+async function buyBoosts(ns, log, state, request) {
+  const division = state.divisions.find((/** @type {{name: string}} */ entry) => entry.name === request.division);
+  if (!division) { log("failed", `boosts: no division ${request.division}`); return; }
+  const data = await runReader(ns, "boost-data", [JSON.stringify([division.industry])]);
+  const cities = state.warehouses.filter((/** @type {{division: string}} */ warehouse) => warehouse.division === division.name)
+    .map((/** @type {{city: string, level: number, size: number, sizeUsed: number}} */ warehouse) => {
+      const materials = state.materials.filter((/** @type {MaterialData} */ material) => material.division === division.name && material.city === warehouse.city
+        && /** @type {readonly string[]} */ (BOOST_MATERIALS).includes(material.name));
+      return {
+        city: warehouse.city, level: warehouse.level, size: warehouse.size, sizeUsed: warehouse.sizeUsed,
+        stored: Object.fromEntries(materials.map((/** @type {MaterialData} */ material) => [material.name, material.stored])),
+        prices: Object.fromEntries(materials.map((/** @type {MaterialData} */ material) => [material.name, material.marketPrice])),
+      };
+    });
+  if (!cities.length) { log("failed", `boosts: ${division.name} has no warehouses`); return; }
+  const budget = state.corporation.funds * request.budgetFraction;
+  const plan = planBoosts(cities, data.factors[division.industry], data.sizes, data.baseCosts, budget, request.fill);
+  if (request.dryRun) {
+    log("plan", `${division.name}: warehouses to level ${plan.targetLevel}, ~${(plan.cost / 1e9).toFixed(1)}b of ${(budget / 1e9).toFixed(1)}b budget`);
+    for (const city of plan.cities) log("plan", `  ${city.city}: +${city.levels} levels (${(city.upgradeCost / 1e9).toFixed(1)}b), size ${Math.round(city.newSize)}, `
+      + `buy ${JSON.stringify(city.purchases)} (${(city.purchaseCost / 1e9).toFixed(1)}b)`);
+    return;
+  }
+  const upgrades = plan.cities.filter((city) => city.levels > 0).map((city) => [division.name, city.city, city.levels]);
+  if (upgrades.length) await report(ns, log, "upgrade-warehouse", upgrades);
+  const purchases = plan.cities.flatMap((city) => Object.entries(city.purchases).map(([material, amount]) => [division.name, city.city, material, amount]));
+  if (purchases.length) await report(ns, log, "bulk-purchase", purchases);
+  log("boosts", `${division.name}: warehouses to level ${plan.targetLevel}, boosts for ${Math.round(request.fill * 100)}% of the space, `
+    + `~${(plan.cost / 1e9).toFixed(1)}b of ${(budget / 1e9).toFixed(1)}b budget`);
 }
 
 /** "<division>-<n>" with n one above the highest number in use. @param {string} division @param {{name: string}[]} products */
