@@ -3,6 +3,7 @@ import { runAction, runReader } from "lib/corp-scripts.js";
 import { BOOST_MATERIALS, planBoosts } from "lib/corp-boosts.js";
 import { AUTO_UPGRADES, planUpgrades } from "lib/corp-upgrades.js";
 import { JOBS, jobSplit, largestAffordableSize, officeUpgradeCost } from "lib/corp-offices.js";
+import { upkeepCalls } from "lib/corp-upkeep.js";
 import { formatPrice, nextPriceDelta, parsePriceDelta } from "lib/corp-pricing.js";
 
 const STATE_FILE = "data/corp-state.txt";
@@ -17,8 +18,6 @@ const WILSON = "Wilson Analytics";
 const WILSON_BASE_PRICE = 4e9, WILSON_PRICE_MULT = 2;
 const ADVERT_BASE_PRICE = 1e9, ADVERT_PRICE_MULT = 1.06;
 const MAX_ADVERTS_PER_ROUND = 20;
-// Tea / party when energy or morale is this far below the maximum.
-const TOP_UP_MARGIN = 2;
 
 /**
  * @typedef {{division: string, city: CityName, name: string, developmentProgress: number, rating: number,
@@ -47,9 +46,11 @@ const TOP_UP_MARGIN = 2;
 // data/corp-prices.txt (rewritten every pricing round).
 // - Requests queued by tools in data/corp-requests.txt (JSON lines), one per round so each sees a fresh state:
 //   tools/corp-boosts.js (warehouse levels + optimal boost materials), tools/corp-upgrades.js (corporation upgrades),
-//   tools/corp-office.js (office size, hiring, job split).
+//   tools/corp-office.js (office size, hiring, job split), tools/corp-adverts.js (Advert levels for a division).
 // --reinvest-minutes N queues upgrades (20% of funds), main office (15%), all offices (10%) and boosts (10%) every N
 // minutes (each request spends its share of the funds when it runs).
+// --upkeep-and-prices-only: only tea/parties, prices and requests queued by hand (no products, Wilson/Advert or
+// reinvestment; for running the corporation by hand).
 // --hold-upgrades stops Wilson/Advert purchases (e.g. while waiting for an investment offer: spending lowers it).
 // Usage: run services/corp-manager.js [--division tobacco] [--city Aevum]
 /** @param {NS} ns */
@@ -62,6 +63,7 @@ export async function main(ns) {
     ["wilson-fraction", 0.2],
     ["advert-fraction", 0.1],
     ["hold-upgrades", false],
+    ["upkeep-and-prices-only", false],
     ["fixed-material-prices", false],
     ["reinvest-minutes", 0],
   ]);
@@ -86,7 +88,7 @@ export async function main(ns) {
 
     // --reinvest-minutes: queue the growth requests regularly (each spends a share of the funds at that moment).
     const reinvestMinutes = Number(flags["reinvest-minutes"]);
-    if (reinvestMinutes > 0 && Date.now() - lastReinvest > reinvestMinutes * 60_000 && !ns.read(REQUESTS_FILE).trim()) {
+    if (reinvestMinutes > 0 && !flags["upkeep-and-prices-only"] && Date.now() - lastReinvest > reinvestMinutes * 60_000 && !ns.read(REQUESTS_FILE).trim()) {
       lastReinvest = Date.now();
       const time = Date.now();
       const reinvest = [
@@ -109,21 +111,17 @@ export async function main(ns) {
       if (request?.type === "boosts") await buyBoosts(ns, log, state, request);
       else if (request?.type === "upgrades") await buyUpgrades(ns, log, state, request);
       else if (request?.type === "office") await growOffices(ns, log, state, request);
+      else if (request?.type === "adverts") await buyAdverts(ns, log, state, request);
       else if (request) log("failed", `unknown request ${JSON.stringify(request)}`);
       lastRequestTime = Date.now();
       acted = true;
     }
 
-    // Energy and morale (production is multiplied by both): tea and a party sized to bring morale back to the maximum.
-    const tired = (state.offices ?? []).filter((/** @type {OfficeData} */ office) => office.numEmployees > 0 && office.avgEnergy < office.maxEnergy - TOP_UP_MARGIN);
-    const unhappy = (state.offices ?? []).filter((/** @type {OfficeData} */ office) => office.numEmployees > 0 && office.avgMorale < office.maxMorale - TOP_UP_MARGIN);
-    if (tired.length) await report(ns, log, "buy-tea", tired.map((/** @type {OfficeData} */ office) => [office.division, office.city]), false);
-    if (unhappy.length) {
-      // throwParty: morale = (morale + 10 * (m - 1)) * m with m = 1 + costPerEmployee / 1e7; aim for m = max / morale.
-      await report(ns, log, "throw-party", unhappy.map((/** @type {OfficeData} */ office) =>
-        [office.division, office.city, Math.ceil((office.maxMorale / office.avgMorale - 1) * 1e7)]), false);
-    }
-    if (tired.length || unhappy.length) acted = true;
+    // Energy and morale (lib/corp-upkeep.js): tea and parties.
+    const { teaCalls, partyCalls } = upkeepCalls(state.offices ?? []);
+    if (teaCalls.length) await report(ns, log, "buy-tea", teaCalls, false);
+    if (partyCalls.length) await report(ns, log, "throw-party", partyCalls, false);
+    if (teaCalls.length || partyCalls.length) acted = true;
 
     // Prices: only judge a price on sales made after it was set (the readers wait for a SALE after readStartTime).
     if ((state.readStartTime ?? 0) > lastPriceChange) {
@@ -145,6 +143,8 @@ export async function main(ns) {
         acted = true;
       }
     }
+
+    if (flags["upkeep-and-prices-only"]) { if (acted) lastStateTime = state.time; continue; }
 
     const divisionData = state.divisions.find((/** @type {{name: string}} */ entry) => entry.name === division);
     if (!divisionData) { waiting(`no division ${division} yet`); if (acted) lastStateTime = state.time; continue; }
@@ -274,6 +274,24 @@ function readJson(ns, file) {
   } catch {
     return null;
   }
+}
+
+/**
+ * tools/corp-adverts.js request: as many Advert levels for one division as a share of funds buys.
+ * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
+ * @param {{division: string, budgetFraction: number, dryRun?: boolean}} request
+ */
+async function buyAdverts(ns, log, state, request) {
+  const division = state.divisions.find((/** @type {{name: string}} */ entry) => entry.name === request.division);
+  if (!division) { log("failed", `adverts: no division ${request.division}`); return; }
+  const budget = state.corporation.funds * request.budgetFraction;
+  let level = division.numAdVerts, cost = 0;
+  while (cost + ADVERT_BASE_PRICE * ADVERT_PRICE_MULT ** level <= budget) cost += ADVERT_BASE_PRICE * ADVERT_PRICE_MULT ** level++;
+  const levels = level - division.numAdVerts;
+  const summary = `${division.name}: Advert ${division.numAdVerts} -> ${level} for ${(cost / 1e9).toFixed(1)}b of ${(budget / 1e9).toFixed(1)}b`;
+  if (request.dryRun) { log("plan", summary); return; }
+  if (levels) await report(ns, log, "hire-advert", Array.from({ length: levels }, () => [division.name]), false);
+  log("adverts", summary);
 }
 
 /**
