@@ -36,7 +36,8 @@ const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
 // corp-manager.js (home): runs the corporation's routine work, the round 3+ loop of the corporation guide:
 // - Products of every product division (--division all, or a comma list): always one in development in --city
 //   (or the division's first city without an office there); when all product slots are full, the product with
-//   the lowest rating is discontinued first. Design and marketing investment: --invest-fraction of funds each.
+//   the lowest rating is discontinued first. Design and marketing investment: --invest-fraction of funds each
+//   (default 0.02%: the effect grows only with investment^0.1, so large sums buy little).
 //   Finished products get a sell order (MAX) in all cities.
 // - Prices like Market-TA.II for every product and every produced material that sells "MAX" at "MP" or "MP+x"
 //   (lib/corp-pricing.js), without the 70k RP research. Prices set by hand are left alone. Once Market-TA.II is
@@ -64,7 +65,7 @@ export async function main(ns) {
   const flags = ns.flags([
     ["division", "all"],
     ["city", "Aevum"],
-    ["invest-fraction", 0.01],
+    ["invest-fraction", 0.0002],
     ["wilson-fraction", 0.2],
     ["advert-fraction", 0.1],
     ["hold-upgrades", false],
@@ -85,10 +86,10 @@ export async function main(ns) {
   };
   log("start", `product divisions ${flags.division}, main city ${preferredCity}, flags ${JSON.stringify(ns.args)}`);
 
-  while (true) {
-    await ns.sleep(INTERVAL_MS);
+  // One round: requests, upkeep, prices, products, Wilson/Advert. An error is logged and the next round tries again.
+  const playRound = async () => {
     const state = readState(ns);
-    if (!state || state.time <= lastStateTime) continue;
+    if (!state || state.time <= lastStateTime) return;
     let acted = false;
 
     // --reinvest-minutes: queue the growth requests regularly (each spends a share of the funds at that moment).
@@ -155,7 +156,7 @@ export async function main(ns) {
       }
     }
 
-    if (flags["upkeep-and-prices-only"]) { if (acted) lastStateTime = state.time; continue; }
+    if (flags["upkeep-and-prices-only"]) { if (acted) lastStateTime = state.time; return; }
 
     // Product divisions: --division "all" = every division that makes products, else a comma list.
     const productDivisions = productDivisionsOf(state, flags);
@@ -193,6 +194,15 @@ export async function main(ns) {
       }
     }
     if (acted) lastStateTime = state.time;
+  };
+
+  while (true) {
+    await ns.sleep(INTERVAL_MS);
+    try {
+      await playRound();
+    } catch (error) {
+      log("error", String(error instanceof Error ? error.stack ?? error.message : error).replace(/\s+/g, " ").slice(0, 600));
+    }
   }
 }
 
