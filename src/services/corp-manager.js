@@ -34,7 +34,8 @@ const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
  */
 
 // corp-manager.js (home): runs the corporation's routine work, the round 3+ loop of the corporation guide:
-// - Products of --division: always one in development in --city; when all product slots are full, the product with
+// - Products of every product division (--division all, or a comma list): always one in development in --city
+//   (or the division's first city without an office there); when all product slots are full, the product with
 //   the lowest rating is discontinued first. Design and marketing investment: --invest-fraction of funds each.
 //   Finished products get a sell order (MAX) in all cities.
 // - Prices like Market-TA.II for every product and every produced material that sells "MAX" at "MP" or "MP+x"
@@ -42,7 +43,7 @@ const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
 //   researched, products use the game's own. --fixed-material-prices leaves materials alone.
 // - Energy and morale: tea and a party for every office more than 2 below the maximum (what the AutoBrew and
 //   AutoPartyManager research do, without spending RP).
-// - Wilson Analytics when it costs <= --wilson-fraction of funds, then Advert levels for --division while each costs
+// - Wilson Analytics when it costs <= --wilson-fraction of funds, then Advert levels for each product division while each costs
 //   <= --advert-fraction of funds (Wilson first: it multiplies every later Advert).
 // Decisions use data/corp-state.txt (services/corp-status.js, every 20 s); after acting it waits for a newer state.
 // Every action is its own 20 GB worker (workers/corp-do-*.js). Log: data/corp-manager.txt; current prices:
@@ -56,12 +57,12 @@ const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
 // --upkeep-and-prices-only: only tea/parties, prices and requests queued by hand (no products, Wilson/Advert or
 // reinvestment; for running the corporation by hand).
 // --hold-upgrades stops Wilson/Advert purchases (e.g. while waiting for an investment offer: spending lowers it).
-// Usage: run services/corp-manager.js [--division tobacco] [--city Aevum]
+// Usage: run services/corp-manager.js [--division all|tobacco,sicko] [--city Aevum]
 /** @param {NS} ns */
 export async function main(ns) {
   ns.disableLog("ALL");
   const flags = ns.flags([
-    ["division", "tobacco"],
+    ["division", "all"],
     ["city", "Aevum"],
     ["invest-fraction", 0.01],
     ["wilson-fraction", 0.2],
@@ -71,8 +72,8 @@ export async function main(ns) {
     ["fixed-material-prices", false],
     ["reinvest-minutes", 0],
   ]);
-  const division = String(flags.division), mainCity = /** @type {CityName} */ (String(flags.city));
-  /** Products that already have Market-TA.II turned on (not visible in the product data). */
+  const preferredCity = /** @type {CityName} */ (String(flags.city));
+  /** "<division>/<product>" that already have Market-TA.II turned on (not visible in the product data). */
   const marketTa2Products = new Set();
   /** @type {Map<string, {calibrated?: boolean}>} pricing memory per item and city */
   const priceMemory = new Map(Object.entries(readJson(ns, PRICE_MEMORY_FILE) ?? {}));
@@ -82,7 +83,7 @@ export async function main(ns) {
     if (reason !== lastWaiting) log("waiting", reason);
     lastWaiting = reason;
   };
-  log("start", `division ${division}, main city ${mainCity}, flags ${JSON.stringify(ns.args)}`);
+  log("start", `product divisions ${flags.division}, main city ${preferredCity}, flags ${JSON.stringify(ns.args)}`);
 
   while (true) {
     await ns.sleep(INTERVAL_MS);
@@ -95,14 +96,18 @@ export async function main(ns) {
     if (reinvestMinutes > 0 && !flags["upkeep-and-prices-only"] && Date.now() - lastReinvest > reinvestMinutes * 60_000 && !ns.read(REQUESTS_FILE).trim()) {
       lastReinvest = Date.now();
       const time = Date.now();
+      // Office and boost shares are split over the product divisions (each request takes its share of the funds left).
+      const growing = productDivisionsOf(state, flags);
       const reinvest = [
         { type: "upgrades", names: AUTO_UPGRADES, budgetFraction: 0.2, time },
-        { type: "office", division, city: mainCity, size: 0, budgetFraction: 0.15, jobs: null, time },
-        { type: "office", division, city: "all", size: 0, budgetFraction: 0.1, jobs: null, time },
-        { type: "boosts", division, budgetFraction: 0.1, fill: 0.6, time },
+        ...growing.flatMap((entry, index) => [
+          { type: "office", division: entry.name, city: mainCityOf(entry, preferredCity), size: 0, budgetFraction: 0.15 / (growing.length - index), jobs: null, time },
+          { type: "office", division: entry.name, city: "all", size: 0, budgetFraction: 0.1 / (growing.length - index), jobs: null, time },
+          { type: "boosts", division: entry.name, budgetFraction: 0.1 / (growing.length - index), fill: 0.6, time },
+        ]),
       ];
       ns.write(REQUESTS_FILE, reinvest.map((request) => JSON.stringify(request) + "\n").join(""), "a");
-      log("reinvest", "queued upgrades 20%, main office 15%, all offices 10%, boosts 10% of funds");
+      log("reinvest", `queued upgrades 20%; main office 15%, all offices 10%, boosts 10% of funds split over ${growing.map((entry) => entry.name).join(", ") || "no product division"}`);
     }
 
     // Requests from tools (they only queue a line: the workers need the RAM a running tool would take).
@@ -152,70 +157,106 @@ export async function main(ns) {
 
     if (flags["upkeep-and-prices-only"]) { if (acted) lastStateTime = state.time; continue; }
 
-    const divisionData = state.divisions.find((/** @type {{name: string}} */ entry) => entry.name === division);
-    if (!divisionData) { waiting(`no division ${division} yet`); if (acted) lastStateTime = state.time; continue; }
-    if (!divisionData.cities.includes(mainCity)) { waiting(`${division} has no office in ${mainCity} yet`); if (acted) lastStateTime = state.time; continue; }
-    lastWaiting = "";
-    // Development progress and rating are the same in every city: decide on the main city's entries.
-    /** @type {ProductData[]} */
-    const products = (state.products ?? []).filter((/** @type {ProductData} */ product) => product.division === division && product.city === mainCity);
+    // Product divisions: --division "all" = every division that makes products, else a comma list.
+    const productDivisions = productDivisionsOf(state, flags);
+    if (!productDivisions.length) waiting("no product division yet");
+    else lastWaiting = "";
     let funds = state.corporation.funds;
-
-    // Sell orders for finished products (pricing above takes over from "MP"), and Market-TA.II once researched.
-    const finished = products.filter((product) => product.developmentProgress >= 100);
-    const unsold = finished.filter((product) => !product.desiredSellAmount);
-    if (unsold.length) {
-      await report(ns, log, "sell-product", unsold.map((product) => [division, mainCity, product.name, "MAX", "MP", true]));
-      acted = true;
-    }
-    const divisionResearch = (state.researchStatus ?? []).find((/** @type {{division: string}} */ entry) => entry.division === division)?.researched ?? [];
-    if (divisionResearch.includes("Market-TA.II")) {
-      const withoutTa2 = finished.filter((product) => !marketTa2Products.has(product.name));
-      if (withoutTa2.length) {
-        await report(ns, log, "set-product-market-ta2", withoutTa2.map((product) => [division, product.name, true]));
-        for (const product of withoutTa2) marketTa2Products.add(product.name);
-        acted = true;
-      }
+    for (const divisionData of productDivisions) {
+      const outcome = await manageProducts(ns, log, state, divisionData, mainCityOf(divisionData, preferredCity), funds, flags, marketTa2Products);
+      funds = outcome.funds;
+      if (outcome.acted) acted = true;
     }
 
-    // Keep one product in development.
-    if (!products.some((product) => product.developmentProgress < 100)) {
-      if (products.length >= divisionData.maxProducts) {
-        const worst = finished.reduce((lowest, product) => (product.rating < lowest.rating ? product : lowest));
-        await report(ns, log, "discontinue-product", [[division, worst.name]]);
-        marketTa2Products.delete(worst.name);
-      }
-      const investment = Math.max(0, funds * Number(flags["invest-fraction"]));
-      const name = nextProductName(division, products);
-      await report(ns, log, "make-product", [[division, mainCity, name, investment, investment]]);
-      funds -= 2 * investment;
-      acted = true;
-    }
-
-    // Wilson Analytics first, then Advert.
-    if (!flags["hold-upgrades"] && funds > 0) {
+    // Wilson Analytics first (corporation-wide, multiplies every later Advert), then Advert for each product division.
+    if (!flags["hold-upgrades"] && funds > 0 && productDivisions.length) {
       const wilsonCost = WILSON_BASE_PRICE * WILSON_PRICE_MULT ** (state.upgrades?.[WILSON] ?? 0);
       if (wilsonCost <= funds * Number(flags["wilson-fraction"])) {
         await report(ns, log, "level-upgrade", [[WILSON]]);
         funds -= wilsonCost;
         acted = true;
       }
-      const adverts = [];
-      let advertLevel = divisionData.numAdVerts;
-      while (adverts.length < MAX_ADVERTS_PER_ROUND) {
-        const cost = ADVERT_BASE_PRICE * ADVERT_PRICE_MULT ** advertLevel;
-        if (cost > funds * Number(flags["advert-fraction"])) break;
-        adverts.push([division]);
-        funds -= cost;
-        advertLevel++;
-      }
-      if (adverts.length) {
-        await report(ns, log, "hire-advert", adverts);
-        acted = true;
+      for (const divisionData of productDivisions) {
+        const adverts = [];
+        let advertLevel = divisionData.numAdVerts;
+        while (adverts.length < MAX_ADVERTS_PER_ROUND) {
+          const cost = ADVERT_BASE_PRICE * ADVERT_PRICE_MULT ** advertLevel;
+          if (cost > funds * Number(flags["advert-fraction"])) break;
+          adverts.push([divisionData.name]);
+          funds -= cost;
+          advertLevel++;
+        }
+        if (adverts.length) {
+          await report(ns, log, "hire-advert", adverts);
+          acted = true;
+        }
       }
     }
     if (acted) lastStateTime = state.time;
   }
+}
+
+/**
+ * The divisions whose products the manager runs: --division "all" = every division that makes products, else a
+ * comma list of names.
+ * @param {any} state @param {any} flags
+ * @returns {{name: string, cities: CityName[], makesProducts: boolean, maxProducts: number, numAdVerts: number}[]}
+ */
+function productDivisionsOf(state, flags) {
+  const wanted = String(flags.division);
+  return state.divisions.filter((/** @type {{name: string, makesProducts: boolean, cities: string[]}} */ entry) =>
+    entry.makesProducts && entry.cities.length && (wanted === "all" || wanted.split(",").includes(entry.name)));
+}
+
+/**
+ * The city where a division develops products: the preferred one if it has an office there, else its first city.
+ * @param {{cities: CityName[]}} division @param {CityName} preferred
+ */
+function mainCityOf(division, preferred) {
+  return division.cities.includes(preferred) ? preferred : division.cities[0];
+}
+
+/**
+ * One product division: sell orders for finished products (pricing takes over from "MP"), Market-TA.II once
+ * researched, and always one product in development (discontinuing the worst when all slots are full).
+ * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
+ * @param {{name: string, maxProducts: number}} divisionData @param {CityName} mainCity @param {number} funds
+ * @param {any} flags @param {Set<string>} marketTa2Products "<division>/<product>" with Market-TA.II on
+ * @returns {Promise<{acted: boolean, funds: number}>}
+ */
+async function manageProducts(ns, log, state, divisionData, mainCity, funds, flags, marketTa2Products) {
+  const division = divisionData.name;
+  let acted = false;
+  // Development progress and rating are the same in every city: decide on the main city's entries.
+  /** @type {ProductData[]} */
+  const products = (state.products ?? []).filter((/** @type {ProductData} */ product) => product.division === division && product.city === mainCity);
+  const finished = products.filter((product) => product.developmentProgress >= 100);
+  const unsold = finished.filter((product) => !product.desiredSellAmount);
+  if (unsold.length) {
+    await report(ns, log, "sell-product", unsold.map((product) => [division, mainCity, product.name, "MAX", "MP", true]));
+    acted = true;
+  }
+  const divisionResearch = (state.researchStatus ?? []).find((/** @type {{division: string}} */ entry) => entry.division === division)?.researched ?? [];
+  if (divisionResearch.includes("Market-TA.II")) {
+    const withoutTa2 = finished.filter((product) => !marketTa2Products.has(`${division}/${product.name}`));
+    if (withoutTa2.length) {
+      await report(ns, log, "set-product-market-ta2", withoutTa2.map((product) => [division, product.name, true]));
+      for (const product of withoutTa2) marketTa2Products.add(`${division}/${product.name}`);
+      acted = true;
+    }
+  }
+  if (!products.some((product) => product.developmentProgress < 100)) {
+    if (products.length >= divisionData.maxProducts && finished.length) {
+      const worst = finished.reduce((lowest, product) => (product.rating < lowest.rating ? product : lowest));
+      await report(ns, log, "discontinue-product", [[division, worst.name]]);
+      marketTa2Products.delete(`${division}/${worst.name}`);
+    }
+    const investment = Math.max(0, funds * Number(flags["invest-fraction"]));
+    await report(ns, log, "make-product", [[division, mainCity, nextProductName(division, products), investment, investment]]);
+    funds -= 2 * investment;
+    acted = true;
+  }
+  return { acted, funds };
 }
 
 /**
@@ -294,7 +335,7 @@ async function buyAdverts(ns, log, state, request) {
   let level = division.numAdVerts, cost = 0;
   while (cost + ADVERT_BASE_PRICE * ADVERT_PRICE_MULT ** level <= budget) cost += ADVERT_BASE_PRICE * ADVERT_PRICE_MULT ** level++;
   const levels = level - division.numAdVerts;
-  const summary = `${division.name}: Advert ${division.numAdVerts} -> ${level} for ${(cost / 1e9).toFixed(1)}b of ${(budget / 1e9).toFixed(1)}b`;
+  const summary = `${division.name}: Advert ${division.numAdVerts} -> ${level} for $${(cost / 1e9).toFixed(1)}b of $${(budget / 1e9).toFixed(1)}b`;
   if (request.dryRun) { log("plan", summary); return; }
   if (levels) await report(ns, log, "hire-advert", Array.from({ length: levels }, () => [division.name]), false);
   log("adverts", summary);
@@ -350,10 +391,10 @@ async function buyUpgrades(ns, log, state, request) {
   const budget = state.corporation.funds * request.budgetFraction;
   const plan = planUpgrades(state.upgrades ?? {}, request.names, budget);
   const summary = Object.entries(plan.levels).map(([name, levels]) => `${name} +${levels} (to ${(state.upgrades?.[name] ?? 0) + levels})`).join(", ");
-  if (request.dryRun) { log("plan", `upgrades for ${(plan.cost / 1e9).toFixed(1)}b of ${(budget / 1e9).toFixed(1)}b: ${summary || "nothing affordable"}`); return; }
+  if (request.dryRun) { log("plan", `upgrades for $${(plan.cost / 1e9).toFixed(1)}b of $${(budget / 1e9).toFixed(1)}b: ${summary || "nothing affordable"}`); return; }
   const calls = Object.entries(plan.levels).flatMap(([name, levels]) => Array.from({ length: levels }, () => [name]));
   if (calls.length) await report(ns, log, "level-upgrade", calls, false);
-  log("upgrades", `${(plan.cost / 1e9).toFixed(1)}b of ${(budget / 1e9).toFixed(1)}b: ${summary || "nothing affordable"}`);
+  log("upgrades", `$${(plan.cost / 1e9).toFixed(1)}b of $${(budget / 1e9).toFixed(1)}b: ${summary || "nothing affordable"}`);
 }
 
 /**
@@ -444,9 +485,9 @@ async function buyBoosts(ns, log, state, request) {
   const budget = state.corporation.funds * request.budgetFraction;
   const plan = planBoosts(cities, data.industries[division.industry].factors, data.sizes, data.baseCosts, budget, request.fill);
   if (request.dryRun) {
-    log("plan", `${division.name}: warehouses to level ${plan.targetLevel}, ~${(plan.cost / 1e9).toFixed(1)}b of ${(budget / 1e9).toFixed(1)}b budget`);
-    for (const city of plan.cities) log("plan", `  ${city.city}: +${city.levels} levels (${(city.upgradeCost / 1e9).toFixed(1)}b), size ${Math.round(city.newSize)}, `
-      + `buy ${JSON.stringify(city.purchases)} (${(city.purchaseCost / 1e9).toFixed(1)}b)`);
+    log("plan", `${division.name}: warehouses to level ${plan.targetLevel}, ~$${(plan.cost / 1e9).toFixed(1)}b of $${(budget / 1e9).toFixed(1)}b budget`);
+    for (const city of plan.cities) log("plan", `  ${city.city}: +${city.levels} levels ($${(city.upgradeCost / 1e9).toFixed(1)}b), size ${Math.round(city.newSize)}, `
+      + `buy ${JSON.stringify(city.purchases)} ($${(city.purchaseCost / 1e9).toFixed(1)}b)`);
     return;
   }
   const upgrades = plan.cities.filter((city) => city.levels > 0).map((city) => [division.name, city.city, city.levels]);
@@ -454,7 +495,7 @@ async function buyBoosts(ns, log, state, request) {
   const purchases = plan.cities.flatMap((city) => Object.entries(city.purchases).map(([material, amount]) => [division.name, city.city, material, amount]));
   if (purchases.length) await report(ns, log, "bulk-purchase", purchases);
   log("boosts", `${division.name}: warehouses to level ${plan.targetLevel}, boosts for ${Math.round(request.fill * 100)}% of the space, `
-    + `~${(plan.cost / 1e9).toFixed(1)}b of ${(budget / 1e9).toFixed(1)}b budget`);
+    + `~$${(plan.cost / 1e9).toFixed(1)}b of $${(budget / 1e9).toFixed(1)}b budget`);
 }
 
 /** "<division>-<n>" with n one above the highest number in use. @param {string} division @param {{name: string}[]} products */
