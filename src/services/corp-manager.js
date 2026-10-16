@@ -53,7 +53,8 @@ const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
 //   tools/corp-boosts.js (warehouse levels + optimal boost materials), tools/corp-upgrades.js (corporation upgrades),
 //   tools/corp-office.js (office size, hiring, job split), tools/corp-adverts.js (Advert levels for a division),
 //   tools/corp-expand.js (a division in every city), tools/corp-exports.js (supply chain exports between divisions),
-//   tools/corp-limit-production.js (cap a material's production, e.g. Robots in Robotics).
+//   tools/corp-limit-production.js (cap a material's production, e.g. Robots in Robotics),
+//   tools/corp-add-division.js (all set-up steps for a new division in one go).
 // --reinvest-minutes N queues upgrades (20% of funds), main office (15%), all offices (10%) and boosts (10%) every N
 // minutes (each request spends its share of the funds when it runs).
 // --upkeep-and-prices-only: only tea/parties, prices and requests queued by hand (no products, Wilson/Advert or
@@ -126,6 +127,7 @@ export async function main(ns) {
       else if (request?.type === "expand") await expandDivision(ns, log, state, request);
       else if (request?.type === "exports") await setUpExports(ns, log, state, request);
       else if (request?.type === "limit-production") await limitProduction(ns, log, state, request);
+      else if (request?.type === "add-division") addDivisionSteps(ns, log, state, request, mainCityOf, preferredCity);
       else if (request) log("failed", `unknown request ${JSON.stringify(request)}`);
       lastRequestTime = Date.now();
       acted = true;
@@ -407,6 +409,32 @@ async function buyUpgrades(ns, log, state, request) {
   const calls = Object.entries(plan.levels).flatMap(([name, levels]) => Array.from({ length: levels }, () => [name]));
   if (calls.length) await report(ns, log, "level-upgrade", calls, false);
   log("upgrades", `$${(plan.cost / 1e9).toFixed(1)}b of $${(budget / 1e9).toFixed(1)}b: ${summary || "nothing affordable"}`);
+}
+
+/**
+ * tools/corp-add-division.js request: puts the set-up steps for one division at the front of the queue (they then
+ * run one per round like any request, each seeing what the previous one changed).
+ * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
+ * @param {{division: string, budgetFraction: number}} request
+ * @param {(division: {cities: CityName[]}, preferred: CityName) => CityName} mainCityOf @param {CityName} preferredCity
+ */
+function addDivisionSteps(ns, log, state, request, mainCityOf, preferredCity) {
+  const division = state.divisions.find((/** @type {{name: string}} */ entry) => entry.name === request.division);
+  if (!division) { log("failed", `add-division: no division ${request.division} (create it in the game first)`); return; }
+  const time = Date.now(), name = division.name, budgetFraction = request.budgetFraction;
+  const steps = [
+    { type: "expand", division: name, time },
+    // Product divisions develop in the main city: Engineers and Management drive rating, speed and markup.
+    ...(division.makesProducts ? [{ type: "office", division: name, city: preferredCity, size: 0, budgetFraction,
+      jobs: { Operations: 4, Engineer: 22, Business: 8, Management: 24 }, time }] : []),
+    { type: "office", division: name, city: "all", size: 0, budgetFraction, jobs: null, time },
+    { type: "boosts", division: name, budgetFraction, fill: 0.5, time },
+    { type: "exports", time },
+    ...(division.makesProducts ? [{ type: "adverts", division: name, budgetFraction, time }] : []),
+  ];
+  const rest = ns.read(REQUESTS_FILE);
+  ns.write(REQUESTS_FILE, steps.map((step) => JSON.stringify(step) + "\n").join("") + rest, "w");
+  log("add-div", `${name} (${division.industry}${division.makesProducts ? ", products" : ""}): queued ${steps.map((step) => step.type).join(", ")}`);
 }
 
 /**
