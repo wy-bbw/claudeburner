@@ -43,6 +43,8 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   up, the warehouses filled and Agriculture production fell to 40%). Research only when it costs < half the RP pool;
   RP per office = 0.004 x sqrt(R&D output) -> Project Insight (linear) beats more R&D staff. Product effective rating =
   min(rating, sqrt(rating) x input quality): with Plants quality ~50, input quality is not the bottleneck below ~2500.
+  Game bug: a produced material whose stock and production are both 0 in a cycle gets quality 0/0 = NaN forever
+  (unsellable); save + reload fixes it (JSON turns NaN into null). Never cap production at exactly 0.
 - The bridge runs as a background task of the session: start it again with `node bridge/server.mjs` (the game reconnects,
   or Options -> Remote API -> Connect after a game restart).
 - Darknet: map + crack tools exist (`tools/darknet-*.js`); Those are fine. Do continue it.
