@@ -8,7 +8,20 @@ prep the next target in parallel. Verify every model/claim with the metrics samp
 baseline vs change, marks in `marks.txt`) — formulas from memory have been wrong before.
 Lesson: every server starts at 4% of max money; low-growth targets need hours of prep (sigma-cosmetics ~5 h), n00dles ~1 min.
 
-## Status (2026-10-13, late BitNode 1)
+## Status (2026-10-16): BitNode 3 done, BitNode 4 next
+- BN3 result (2 days): corporation profit $2.7M/s -> ~$1.8e28/s, personal money ~1e49 (dividends + shares), all
+  augmentations via corporation bribes ($1b corp funds per faction rep point) and company work (8k company rep/s with
+  the late multipliers: 300k invite in < 40 s with the company server backdoored). Endgame lever: NeuroFlux levels via
+  bribes for the hacking level `w0r1d_d43m0n` needs (3000 x WorldDaemonDifficulty).
+- BN4 plan (multipliers from the game code): no corporation penalties (same as BN3), ScriptHackMoney 0.2, HackExpGain 0.4,
+  gym/company/faction work exp 0.5, FactionWorkRepGain 0.75, WorldDaemonDifficulty 3 = hacking 9000. Reward SF4 =
+  Singularity API (RAM x16 at SF4.1, x4 at 4.2, x1 at 4.3): automate factions, augmentation buying, installs, work.
+  Start: `run start.js` (hacking) until $150b personal money -> create the corporation self-funded (seed money is BN3
+  only) -> round 1 by hand -> buy Office API + Warehouse API ($50b each in corp funds; free only with SF3.3; every corp
+  script needs them) -> `run start-corporation.js` -> the BN3 recipe with the tools (corp-add-division, ...).
+  After every augmentation install run start-corporation.js as well as start.js (start.js starts no corp services).
+
+## History: late BitNode 1 (2026-10-13)
 - BitNode 1 near the end: 33 augmentations installed, NeuroFlux Governor level 69 (next level ~4.2M rep: x1.14 per
   level from base 500, read from the game code). Money ~$4q, income ~$1t/s once the big targets are prepped,
   home 8.39 PB, hacking ~1900, charisma ~2700 (darknet phishing). Money is no longer scarce; faction rep is.
@@ -105,8 +118,8 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   High science factor helps the rating: Pharmaceutical "sicko" (0.8) out-earned Tobacco 6x. Tools: corp-expand,
   corp-office, corp-boosts, corp-exports (generic from industry data), corp-adverts; the manager runs products for
   every product division.
-- State 2026-10-14 evening: round 4 accepted, public, Shady Accounting, dividend 1%, profit ~$25-30B/s, home 512 GB.
-  Next: one big corporation script (enough RAM to call the API directly instead of workers + request queue).
+- With lots of home RAM, a single corporation script calling the API directly would replace the workers + request
+  queue (not done yet; the worker design still works on a 32 GB home at the start of a BitNode).
 - Node is at `C:\Program Files\nodejs` — prepend to PATH in shells started before the install.
 
 ## Conventions
