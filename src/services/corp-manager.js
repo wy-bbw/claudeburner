@@ -52,7 +52,8 @@ const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
 // - Requests queued by tools in data/corp-requests.txt (JSON lines), one per round so each sees a fresh state:
 //   tools/corp-boosts.js (warehouse levels + optimal boost materials), tools/corp-upgrades.js (corporation upgrades),
 //   tools/corp-office.js (office size, hiring, job split), tools/corp-adverts.js (Advert levels for a division),
-//   tools/corp-expand.js (a division in every city), tools/corp-exports.js (supply chain exports between divisions).
+//   tools/corp-expand.js (a division in every city), tools/corp-exports.js (supply chain exports between divisions),
+//   tools/corp-limit-production.js (cap a material's production, e.g. Robots in Robotics).
 // --reinvest-minutes N queues upgrades (20% of funds), main office (15%), all offices (10%) and boosts (10%) every N
 // minutes (each request spends its share of the funds when it runs).
 // --upkeep-and-prices-only: only tea/parties, prices and requests queued by hand (no products, Wilson/Advert or
@@ -124,6 +125,7 @@ export async function main(ns) {
       else if (request?.type === "adverts") await buyAdverts(ns, log, state, request);
       else if (request?.type === "expand") await expandDivision(ns, log, state, request);
       else if (request?.type === "exports") await setUpExports(ns, log, state, request);
+      else if (request?.type === "limit-production") await limitProduction(ns, log, state, request);
       else if (request) log("failed", `unknown request ${JSON.stringify(request)}`);
       lastRequestTime = Date.now();
       acted = true;
@@ -405,6 +407,18 @@ async function buyUpgrades(ns, log, state, request) {
   const calls = Object.entries(plan.levels).flatMap(([name, levels]) => Array.from({ length: levels }, () => [name]));
   if (calls.length) await report(ns, log, "level-upgrade", calls, false);
   log("upgrades", `$${(plan.cost / 1e9).toFixed(1)}b of $${(budget / 1e9).toFixed(1)}b: ${summary || "nothing affordable"}`);
+}
+
+/**
+ * tools/corp-limit-production.js request: cap a material's production in every city of a division.
+ * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
+ * @param {{division: string, material: string, amount: number}} request
+ */
+async function limitProduction(ns, log, state, request) {
+  const division = state.divisions.find((/** @type {{name: string}} */ entry) => entry.name === request.division);
+  if (!division) { log("failed", `limit-production: no division ${request.division}`); return; }
+  await report(ns, log, "limit-material-production", division.cities.map((/** @type {string} */ city) => [division.name, city, request.material, request.amount]), false);
+  log("limit", `${division.name}: ${request.material} production capped at ${request.amount}/s in ${division.cities.length} cities`);
 }
 
 /**

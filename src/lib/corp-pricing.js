@@ -14,18 +14,22 @@ const PROBE_FACTORS = { product: { uncalibrated: 3, calibrated: 1.15 }, material
 // in one cycle would push the price down hard after every overshoot).
 const DRAIN_CYCLES = { product: 5, material: 1 };
 const SOLD_OUT_TOLERANCE = 0.01;
+// Lowest price below MP when the market cannot absorb the supply (sales grow with MP / price below MP).
+const MIN_PRICE_OF_MARKET_PRICE = 0.1;
 
-/** "MP" -> 0, "MP+12.5" -> 12.5; anything else (a price set by hand) -> null: leave it alone. @param {unknown} price */
+/** "MP" -> 0, "MP+12.5" -> 12.5, "MP-3" -> -3; anything else (a price set by hand) -> null: leave it alone. @param {unknown} price */
 export function parsePriceDelta(price) {
   const text = String(price).replace(/\s+/g, "");
   if (text === "MP") return 0;
-  const match = text.match(/^MP\+(\d+(?:\.\d+)?(?:e[+-]?\d+)?)$/i);
-  return match ? Number(match[1]) : null;
+  const match = text.match(/^MP([+-])(\d+(?:\.\d+)?(?:e[+-]?\d+)?)$/i);
+  return match ? (match[1] === "-" ? -1 : 1) * Number(match[2]) : null;
 }
 
 /** @param {number} delta */
 export function formatPrice(delta) {
-  return delta > 0 ? `MP+${Number(delta.toPrecision(6))}` : "MP";
+  if (delta > 0) return `MP+${Number(delta.toPrecision(6))}`;
+  if (delta < 0) return `MP-${Number((-delta).toPrecision(6))}`;
+  return "MP";
 }
 
 /**
@@ -43,6 +47,14 @@ export function nextPriceDelta(item, memory) {
   const offered = sold + leftover / 10;
   if (offered <= 0) return { delta, reason: "nothing to sell" };
   const soldOut = leftover <= Math.max(1, SOLD_OUT_TOLERANCE * offered * 10);
+  // Below MP (code: sales x MP / price): only when stock is left even at MP, e.g. a material the market cannot absorb.
+  if (delta < 0 && soldOut) return { delta: delta / 2 > -0.005 * marketPrice ? 0 : delta / 2, reason: "sold out below MP: halving the discount" };
+  if (delta <= 0 && !soldOut) {
+    const potentialAtMarketPrice = sold * (marketPrice + delta) / marketPrice;
+    const target = Math.max(supply, sold) + leftover / (10 * DRAIN_CYCLES[item.kind ?? "material"]);
+    const price = Math.max(MIN_PRICE_OF_MARKET_PRICE * marketPrice, marketPrice * potentialAtMarketPrice / target);
+    return { delta: Math.min(0, price - marketPrice), reason: "stock left at or below MP: price below MP for supply + stock" };
+  }
   if (soldOut) {
     const factors = PROBE_FACTORS[item.kind ?? "material"];
     const factor = memory.calibrated ? factors.calibrated : factors.uncalibrated;
@@ -50,7 +62,6 @@ export function nextPriceDelta(item, memory) {
     if ((item.startDelta ?? 0) > probedDelta) return { delta: item.startDelta ?? 0, reason: "sold out: up to the best older product's price" };
     return { delta: probedDelta, reason: delta <= 0 ? "sold out at MP: first markup" : "sold out: probing higher" };
   }
-  if (delta <= 0) return { delta: 0, reason: "stock left even at MP" };
   memory.calibrated = true;
   const salesConstant = sold * delta ** 2;
   const drainCycles = DRAIN_CYCLES[item.kind ?? "material"];
