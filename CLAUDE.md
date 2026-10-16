@@ -76,6 +76,11 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   (CorpFactionRepRequirement), x0.75 = 300k with a backdoor on the company's own server (Fulcrum Technologies -> fulcrumtech,
   not fulcrumassets). Fulcrum Secret Technologies also needs a backdoor on fulcrumassets. All company factions keep
   membership across aug installs (keepOnInstall), so the company grind is once per BitNode. No crime/karma requirement. `tools/path.js <server>` prints the connect chain. Clarke = clarkinc (needs hacking 1153).
+- Infiltration (2026-10-16): `services/infiltration-solver.js` (1.6 GB) solves all 8 mini-games. The game only checks `isTrusted && instanceof
+  KeyboardEvent` in its document keydown listener (failure = automated = hospital); the solver skips it: it finds the infiltration object
+  via the React fiber `memoizedProps.state` of any h4 and calls `stage.onKey({key,...})` directly. Verified offline against the real stage
+  classes from main.bundle.js (12800 runs, 0 failures); the fiber lookup is untested live. Start button is only pressed below
+  `--max-difficulty` (3; at >= 3.5 the game kills you). `tools/infiltrations.js` lists targets by money/rep per difficulty.
 - Ideas not started: install helper (aug order/cost/timing from a pasted faction list).
 - Stock traders (2026-10-12): `services/stock-trader-4s.js` (4S forecast; buy >= 0.6 ranked by (forecast-0.5)*volatility,
   sell < 0.55; 19.75 GB) and `services/stock-trader.js` (no 4S: forecast estimated from 50 ticks, buy >= 0.65, sell < 0.5,
