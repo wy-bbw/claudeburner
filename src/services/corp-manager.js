@@ -18,6 +18,9 @@ const WILSON = "Wilson Analytics";
 const WILSON_BASE_PRICE = 4e9, WILSON_PRICE_MULT = 2;
 const ADVERT_BASE_PRICE = 1e9, ADVERT_PRICE_MULT = 1.06;
 const MAX_ADVERTS_PER_ROUND = 20;
+const ALL_CITIES = /** @type {CityName[]} */ (["Sector-12", "Aevum", "Chongqing", "New Tokyo", "Ishima", "Volhaven"]);
+// The corporation guide's export amount: exactly what the importer will use next cycle, minus what it still has.
+const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
 
 /**
  * @typedef {{division: string, city: CityName, name: string, developmentProgress: number, rating: number,
@@ -46,7 +49,8 @@ const MAX_ADVERTS_PER_ROUND = 20;
 // data/corp-prices.txt (rewritten every pricing round).
 // - Requests queued by tools in data/corp-requests.txt (JSON lines), one per round so each sees a fresh state:
 //   tools/corp-boosts.js (warehouse levels + optimal boost materials), tools/corp-upgrades.js (corporation upgrades),
-//   tools/corp-office.js (office size, hiring, job split), tools/corp-adverts.js (Advert levels for a division).
+//   tools/corp-office.js (office size, hiring, job split), tools/corp-adverts.js (Advert levels for a division),
+//   tools/corp-expand.js (a division in every city), tools/corp-exports.js (supply chain exports between divisions).
 // --reinvest-minutes N queues upgrades (20% of funds), main office (15%), all offices (10%) and boosts (10%) every N
 // minutes (each request spends its share of the funds when it runs).
 // --upkeep-and-prices-only: only tea/parties, prices and requests queued by hand (no products, Wilson/Advert or
@@ -112,6 +116,8 @@ export async function main(ns) {
       else if (request?.type === "upgrades") await buyUpgrades(ns, log, state, request);
       else if (request?.type === "office") await growOffices(ns, log, state, request);
       else if (request?.type === "adverts") await buyAdverts(ns, log, state, request);
+      else if (request?.type === "expand") await expandDivision(ns, log, state, request);
+      else if (request?.type === "exports") await setUpExports(ns, log, state, request);
       else if (request) log("failed", `unknown request ${JSON.stringify(request)}`);
       lastRequestTime = Date.now();
       acted = true;
@@ -351,6 +357,71 @@ async function buyUpgrades(ns, log, state, request) {
 }
 
 /**
+ * tools/corp-expand.js request: a division in every city - offices ($4b), warehouses ($5b), Smart Supply on, and a
+ * "MAX" / "MP" sell order for every material the industry produces (the pricing takes over from there).
+ * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
+ * @param {{division: string, dryRun?: boolean}} request
+ */
+async function expandDivision(ns, log, state, request) {
+  const division = state.divisions.find((/** @type {{name: string}} */ entry) => entry.name === request.division);
+  if (!division) { log("failed", `expand: no division ${request.division}`); return; }
+  const data = await runReader(ns, "industry-data", [JSON.stringify([division.industry])]);
+  const produced = /** @type {string[]} */ (data.industries[division.industry].producedMaterials);
+  const newCities = ALL_CITIES.filter((city) => !division.cities.includes(city));
+  const withWarehouse = new Set(state.warehouses.filter((/** @type {{division: string}} */ warehouse) => warehouse.division === division.name)
+    .map((/** @type {{city: string}} */ warehouse) => warehouse.city));
+  const needWarehouse = ALL_CITIES.filter((city) => !withWarehouse.has(city));
+  const summary = `${division.name} (${division.industry}): open ${newCities.join(", ") || "no new cities"}; `
+    + `warehouses in ${needWarehouse.join(", ") || "none needed"}; sell ${produced.join(", ") || "nothing"} (MAX at MP) everywhere`;
+  if (request.dryRun) { log("plan", summary); return; }
+  if (newCities.length) await report(ns, log, "expand-city", newCities.map((city) => [division.name, city]));
+  if (needWarehouse.length) await report(ns, log, "purchase-warehouse", needWarehouse.map((city) => [division.name, city]));
+  await report(ns, log, "set-smart-supply", ALL_CITIES.map((city) => [division.name, city, true]), false);
+  const sellOrders = ALL_CITIES.flatMap((city) => produced.map((material) => [division.name, city, material, "MAX", "MP"]));
+  if (sellOrders.length) await report(ns, log, "sell-material", sellOrders, false);
+  log("expand", summary);
+}
+
+/**
+ * tools/corp-exports.js request: every division gets every input material that another division of the corporation
+ * produces, in every city where both have a warehouse, with the guide's amount (IPROD+IINV/10)*(-1); Smart Supply of
+ * imported materials set to "leftovers" (it then buys only what the stock, imports included, does not cover).
+ * Existing exports are kept.
+ * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
+ * @param {{dryRun?: boolean}} request
+ */
+async function setUpExports(ns, log, state, request) {
+  /** @type {{name: string, industry: string}[]} */
+  const divisions = state.divisions;
+  const data = await runReader(ns, "industry-data", [JSON.stringify([...new Set(divisions.map((division) => division.industry))])]);
+  const warehouseCities = (/** @type {string} */ name) => new Set(state.warehouses
+    .filter((/** @type {{division: string}} */ warehouse) => warehouse.division === name).map((/** @type {{city: string}} */ warehouse) => warehouse.city));
+  const exports = [], supplyOptions = [], routes = [];
+  for (const importer of divisions) {
+    for (const material of Object.keys(data.industries[importer.industry].requiredMaterials ?? {})) {
+      for (const exporter of divisions.filter((division) => division.name !== importer.name
+        && data.industries[division.industry].producedMaterials.includes(material))) {
+        const exporterCities = warehouseCities(exporter.name);
+        const cities = [...warehouseCities(importer.name)].filter((city) => exporterCities.has(city));
+        if (!cities.length) continue;
+        routes.push(`${material} ${exporter.name} -> ${importer.name} (${cities.length} cities)`);
+        for (const city of cities) {
+          const source = state.materials.find((/** @type {{division: string, city: string, name: string}} */ entry) =>
+            entry.division === exporter.name && entry.city === city && entry.name === material);
+          const existing = (source?.exports ?? []).some((/** @type {{division: string, city: string}} */ target) => target.division === importer.name && target.city === city);
+          if (!existing) exports.push([exporter.name, city, importer.name, city, material, EXPORT_AMOUNT]);
+          supplyOptions.push([importer.name, city, material, "leftovers"]);
+        }
+      }
+    }
+  }
+  if (request.dryRun) { log("plan", `exports: ${routes.join("; ") || "none"}; ${exports.length} new`); return; }
+  if (exports.length) await report(ns, log, "export-material", exports, false);
+  if (supplyOptions.length) await report(ns, log, "set-smart-supply-option", supplyOptions, false);
+  log("exports", `${routes.join("; ") || "none"}; ${exports.length} new`);
+}
+
+/**
  * tools/corp-boosts.js request: warehouse levels + optimal boost materials for one division (lib/corp-boosts.js).
  * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
  * @param {{division: string, budgetFraction: number, fill: number, dryRun?: boolean}} request
@@ -358,7 +429,7 @@ async function buyUpgrades(ns, log, state, request) {
 async function buyBoosts(ns, log, state, request) {
   const division = state.divisions.find((/** @type {{name: string}} */ entry) => entry.name === request.division);
   if (!division) { log("failed", `boosts: no division ${request.division}`); return; }
-  const data = await runReader(ns, "boost-data", [JSON.stringify([division.industry])]);
+  const data = await runReader(ns, "industry-data", [JSON.stringify([division.industry])]);
   const cities = state.warehouses.filter((/** @type {{division: string}} */ warehouse) => warehouse.division === division.name)
     .map((/** @type {{city: string, level: number, size: number, sizeUsed: number}} */ warehouse) => {
       const materials = state.materials.filter((/** @type {MaterialData} */ material) => material.division === division.name && material.city === warehouse.city
@@ -371,7 +442,7 @@ async function buyBoosts(ns, log, state, request) {
     });
   if (!cities.length) { log("failed", `boosts: ${division.name} has no warehouses`); return; }
   const budget = state.corporation.funds * request.budgetFraction;
-  const plan = planBoosts(cities, data.factors[division.industry], data.sizes, data.baseCosts, budget, request.fill);
+  const plan = planBoosts(cities, data.industries[division.industry].factors, data.sizes, data.baseCosts, budget, request.fill);
   if (request.dryRun) {
     log("plan", `${division.name}: warehouses to level ${plan.targetLevel}, ~${(plan.cost / 1e9).toFixed(1)}b of ${(budget / 1e9).toFixed(1)}b budget`);
     for (const city of plan.cities) log("plan", `  ${city.city}: +${city.levels} levels (${(city.upgradeCost / 1e9).toFixed(1)}b), size ${Math.round(city.newSize)}, `
