@@ -95,6 +95,14 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   --division d --city c|all --size n|--budget-fraction f [--jobs "Operations:4,Engineer:22,..."]` (grow, hire,
   ceil(size/9) interns first, split). The manager also buys tea and throws parties below max energy/morale - 2.
   The game silently ignores office/warehouse upgrades it cannot afford (workers then report ok).
+- Product bomb recipe (worked 2026-10-16: profit $190t/s -> $2.4q/s in 6 minutes): basic machinery first
+  (Agriculture -> Chemical -> products, exports, pricing), then Wilson Analytics as high as possible (each Advert
+  purchase uses the Wilson multiplier at the time of purchase: buy Wilson BEFORE Advert), then a NEW product division
+  (Advert levels count per division: a new one starts at the cheap levels; all corporation-wide upgrades apply at once;
+  a big main office gives high-rated first products), ad bomb it, Market-TA.II turns the potential sales into price.
+  High science factor helps the rating: Pharmaceutical "sicko" (0.8) out-earned Tobacco 6x. Tools: corp-expand,
+  corp-office, corp-boosts, corp-exports (generic from industry data), corp-adverts; the manager runs products for
+  every product division.
 - State 2026-10-14 evening: round 4 accepted, public, Shady Accounting, dividend 1%, profit ~$25-30B/s, home 512 GB.
   Next: one big corporation script (enough RAM to call the API directly instead of workers + request queue).
 - Node is at `C:\Program Files\nodejs` — prepend to PATH in shells started before the install.
