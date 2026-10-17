@@ -81,6 +81,10 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   via the React fiber `memoizedProps.state` of any h4 and calls `stage.onKey({key,...})` directly. Verified offline against the real stage
   classes from main.bundle.js (12800 runs, 0 failures); the fiber lookup is untested live. Start button is only pressed below
   `--max-difficulty` (3; at >= 3.5 the game kills you). `tools/infiltrations.js` lists targets by money/rep per difficulty.
+  `services/infiltration-autopilot.js` (24.6 GB) runs the whole loop: best reward/s target (API reward includes the market demand), travel, `goToLocation`,
+  presses Infiltrate Company by calling the button handler with `{isTrusted:true}`, solves (shared `lib/infiltration-minigames.js`), then trades for
+  `--faction` rep (React Select onChange + Trade button) or sells (`--money-floor`), hospital below 70% hp. Tested live 2026-10-17: 1 full run, 20 levels in ~32 s.
+  Starting it while a success screen is open pays that infiltration out immediately.
 - Combat stats (2026-10-17): `services/gym-trainer.js` (7.6 GB, Singularity) trains the lowest combat stat in the gym of the city you are in (Sector-12
   Powerhouse x10 exp, Aevum Snap x5, Volhaven Millenium x4; never travels unless `--travel`/`--gym`), unfocused by default (`--foreground` = x1.25
   exp). `tools/stat-eta.js` = time to level N (default 200 = The Syndicate); `tools/combat-augmentations.js` = unowned combat augs of your
