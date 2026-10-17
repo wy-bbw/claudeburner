@@ -1,6 +1,7 @@
 import { appendLog } from "lib/log.js";
 import {
-  REFUSE_DIFFICULTY, chooseTradeFaction, findInfiltration, pressInfiltrateButton, sellForMoney, solveCurrentStage, stageKind, tradeForReputation,
+  DEMAND_DECAY_PER_SECOND, REFUSE_DIFFICULTY, chooseTradeFaction, findInfiltration, floorsForDemand, pressInfiltrateButton, readMarketDemand,
+  sellForMoney, solveCurrentStage, stageKind, tradeForReputation,
 } from "lib/infiltration-minigames.js";
 
 const LOG_FILE = "data/infiltration-autopilot.txt";
@@ -13,21 +14,29 @@ const RETRY_COOLDOWN_MS = 15_000;
 const MIN_HP_FRACTION = 0.7; // visit the hospital below this before starting (a failure costs 3 x security level HP)
 
 // infiltration-autopilot.js (home, Singularity API): the whole infiltration loop. Picks the target that pays the most
-// per second right now (the API's reward already contains the market demand), travels to its city, opens it with the
-// "Infiltrate Company" handler (the game wants event.isTrusted there: the handler is called with a plain object),
-// solves every level (lib/infiltration-minigames.js), then trades the intel for faction rep or sells it for money.
+// per second (see demand below), travels to its city, opens it with the "Infiltrate Company" handler (the game wants
+// event.isTrusted there: the handler is called with a plain object), solves every level (lib/infiltration-minigames.js),
+// then trades the intel for faction rep or sells it for money.
+// Market demand: every infiltration adds its level count to "floors" (decay 0.02/s) and the payout is multiplied by
+// 1 - 0.001 x floors^2, taken when Start is pressed. The start screen shows the demand, so the autopilot waits THERE until
+// it is at least --min-demand (the API's reward is the undamaged one). Targets are ranked by reward per cycle, where a
+// cycle is the longer of the run time and the time the floors need to decay back to the --min-demand level.
 //   --faction <name>      trade for this faction's reputation (you must be a member), e.g. "The Syndicate". Without it: money.
 //   --money-floor <n>     sell for money instead of rep while your money is below n (default 0 = always rep)
 //   --max-difficulty <n>  never pick a target above this difficulty (default 3.4; the game kills you at 3.5)
 //   --cities <list>       only these cities, comma-separated (default: all; e.g. "New Tokyo" or "Sector-12,Volhaven")
 //   --runs <n>            stop after n infiltrations (default: never)
+//   --min-demand <f>      start a run only when the market demand is at least this (default 0.75; 0 = never wait)
+//   --return-city <name>  travel here when the autopilot ends, so the gym trainer has a gym ("none" = stay; default Sector-12)
 // Log: data/infiltration-autopilot.txt. Stop it (mid-run it just leaves the infiltration open) with tools/kill.js.
 // Do not run it together with services/infiltration-solver.js. It travels between cities (costs money), so stop
 // services/gym-trainer.js if you want a fixed city: the trainer never travels but waits in cities without a gym.
 // Usage: run services/infiltration-autopilot.js --faction "The Syndicate" [--cities "New Tokyo"] [--money-floor 1e9]
 /** @param {NS} ns */
 export async function main(ns) {
-  const options = ns.flags([["faction", ""], ["money-floor", 0], ["max-difficulty", 3.4], ["cities", ""], ["runs", Infinity]]);
+  const options = ns.flags([["faction", ""], ["money-floor", 0], ["max-difficulty", 3.4], ["cities", ""], ["runs", Infinity], ["min-demand", 0.75], ["return-city", "Sector-12"]]);
+  const minDemand = Math.min(Number(options["min-demand"]), 0.99);
+  const returnCity = String(options["return-city"]);
   const faction = String(options.faction);
   const moneyFloor = Number(options["money-floor"]);
   const maxDifficulty = Math.min(Number(options["max-difficulty"]), REFUSE_DIFFICULTY - 0.01);
@@ -41,10 +50,14 @@ export async function main(ns) {
   let runs = 0;
   let wait = { until: 0, reason: "" }; // pause between failed attempts
   let opening = { since: 0, location: "", pressed: 0 }; // we called goToLocation and wait for the button
-  let finishing = { infiltration: null, mode: "money", since: 0, chose: false, paid: false }; // success screen handling
-  const policy = { faction, moneyFloor, maxDifficulty, cities };
+  /** @type {{infiltration: any, mode: string, since: number, chose: boolean, paid: boolean, moneyBefore: number, repBefore: number}} */
+  let finishing = { infiltration: null, mode: "money", since: 0, chose: false, paid: false, moneyBefore: 0, repBefore: 0 }; // success screen handling
+  const policy = { faction, moneyFloor, maxDifficulty, cities, minDemand };
   let lastWarning = "";
+  let lastTarget = ""; // best target of the previous pick: a change means a stat milestone or a different demand situation
   const reported = new WeakSet();
+  const pacingLogged = new WeakSet();
+  const startDemand = new WeakMap(); // demand at Start, for the run log
 
   while (runs < maxRuns) {
     try {
@@ -54,19 +67,41 @@ export async function main(ns) {
         const kind = stageKind(infiltration.stage);
         if (kind === "idle" && infiltration.gameStartTimestamp < 0) {
           if (!reported.has(infiltration)) {
-            reported.add(infiltration);
             const difficulty = infiltration.startingDifficulty;
+            const demand = readMarketDemand();
             if (difficulty > maxDifficulty) {
+              reported.add(infiltration);
               say("refused", `${infiltration.location.name}: difficulty ${difficulty.toFixed(2)} > ${maxDifficulty}; cancelling`);
               infiltration.cancel();
               wait = { until: Date.now() + RETRY_COOLDOWN_MS, reason: "too hard" };
+            } else if (demand !== null && demand < minDemand) {
+              // the start screen re-reads the demand every second; the payout uses the moment Start is pressed
+              if (!pacingLogged.has(infiltration)) {
+                pacingLogged.add(infiltration);
+                const seconds = Math.log(floorsForDemand(demand) / floorsForDemand(minDemand)) / DEMAND_DECAY_PER_SECOND;
+                say("pacing", `${infiltration.location.name}: demand ${(demand * 100).toFixed(0)}% < ${(minDemand * 100).toFixed(0)}%, starting in about ${seconds.toFixed(0)} s`);
+              }
             } else {
+              reported.add(infiltration);
+              if (demand !== null) startDemand.set(infiltration, demand);
               infiltration.startInfiltration();
             }
           }
         } else if (kind === "idle") {
-          if (finishing.infiltration !== infiltration) finishing = { infiltration, mode: decideMode(ns.getPlayer(), policy).mode, since: Date.now(), chose: false, paid: false };
-          if (!finishing.paid && finishTrade(ns, finishing, faction)) { finishing.paid = true; runs++; say("run", `${runs}: ${infiltration.location.name} (${infiltration.maxLevel} levels) -> ${finishing.mode === "rep" ? `${faction} rep` : "money"}`); }
+          if (finishing.infiltration !== infiltration) {
+            const player = ns.getPlayer();
+            const mode = decideMode(player, policy).mode;
+            finishing = { infiltration, mode, since: Date.now(), chose: false, paid: false, moneyBefore: player.money, repBefore: mode === "rep" ? ns.singularity.getFactionRep(/** @type {any} */ (faction)) : 0 };
+          }
+          if (!finishing.paid && finishTrade(ns, finishing, faction)) {
+            finishing.paid = true;
+            runs++;
+            const gained = finishing.mode === "rep"
+              ? `${ns.format.number(ns.singularity.getFactionRep(/** @type {any} */ (faction)) - finishing.repBefore)} ${faction} rep`
+              : `$${ns.format.number(ns.getPlayer().money - finishing.moneyBefore)}`;
+            const demand = startDemand.get(infiltration);
+            say("run", `${runs}: ${infiltration.location.name} (${infiltration.maxLevel} levels) -> ${gained}${demand === undefined ? "" : `, demand at start ${(demand * 100).toFixed(0)}%`}`);
+          }
         } else {
           solveCurrentStage(infiltration);
         }
@@ -88,6 +123,10 @@ export async function main(ns) {
               wait = { until: Date.now() + RETRY_COOLDOWN_MS, reason: next.reason };
             } else {
               if (next.warning && next.warning !== lastWarning) { lastWarning = next.warning; say("warning", next.warning); }
+              if (next.name !== lastTarget) {
+                if (lastTarget) say("target", `new best target: ${next.name} (was ${lastTarget}); difficulty ${next.difficulty.toFixed(2)}, ${next.levels} levels`);
+                lastTarget = next.name;
+              }
               if (ns.getPlayer().city !== next.city && !ns.singularity.travelToCity(/** @type {Parameters<NS["singularity"]["travelToCity"]>[0]} */ (next.city))) {
                 say("blocked", `cannot travel to ${next.city} (money?)`);
                 wait = { until: Date.now() + RETRY_COOLDOWN_MS, reason: "travel" };
@@ -109,6 +148,10 @@ export async function main(ns) {
     await ns.sleep(TICK_MS);
   }
   say("done", `${runs} infiltrations`);
+  if (returnCity !== "none" && ns.getPlayer().city !== returnCity) {
+    if (ns.singularity.travelToCity(/** @type {Parameters<NS["singularity"]["travelToCity"]>[0]} */ (returnCity))) say("travel", `back to ${returnCity}`);
+    else say("blocked", `cannot travel back to ${returnCity}`);
+  }
 }
 
 /**
@@ -141,7 +184,7 @@ function decideMode(player, policy) {
 
 /**
  * The target that pays the most per second right now. The reward of getInfiltration already includes the market demand.
- * @param {NS} ns @param {{faction: string, moneyFloor: number, maxDifficulty: number, cities: string[]}} policy
+ * @param {NS} ns @param {{faction: string, moneyFloor: number, maxDifficulty: number, cities: string[], minDemand: number}} policy
  * @returns {{name: string, city: string, difficulty: number, levels: number, value: number, mode: string, warning: string, score: number} | {reason: string}}
  */
 function pickTarget(ns, policy) {
@@ -154,7 +197,10 @@ function pickTarget(ns, policy) {
     const info = ns.infiltration.getInfiltration(location.name);
     if (info.difficulty > policy.maxDifficulty) continue;
     const value = mode === "rep" ? info.reward.tradeRep : info.reward.sellCash;
-    const score = value / (info.maxClearanceLevel * SECONDS_PER_LEVEL + SECONDS_PER_RUN);
+    // cycle = the longer of the run and the time the floors need to decay back: after a start the floors are F* + levels
+    const runSeconds = info.maxClearanceLevel * SECONDS_PER_LEVEL + SECONDS_PER_RUN;
+    const paceSeconds = policy.minDemand > 0 ? Math.log(1 + info.maxClearanceLevel / floorsForDemand(policy.minDemand)) / DEMAND_DECAY_PER_SECOND : 0;
+    const score = value / Math.max(runSeconds, paceSeconds);
     if (!best || score > best.score) {
       best = { name: location.name, city: location.city, difficulty: info.difficulty, levels: info.maxClearanceLevel, value, mode, warning, score };
     }

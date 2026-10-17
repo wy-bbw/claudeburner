@@ -7,6 +7,9 @@ import { upkeepCalls } from "lib/corp-upkeep.js";
 import { formatPrice, nextPriceDelta, parsePriceDelta } from "lib/corp-pricing.js";
 
 const STATE_FILE = "data/corp-state.txt";
+// A state snapshot older than this is not the current company (corp-status.js writes one every ~20 s): after a restart or a
+// new BitNode the file still holds the previous corporation, and acting on it buys things for divisions that do not exist.
+const STATE_MAX_AGE_MS = 90_000;
 const LOG_FILE = "data/corp-manager.txt";
 const PRICES_FILE = "data/corp-prices.txt";
 const REQUESTS_FILE = "data/corp-requests.txt";
@@ -92,6 +95,7 @@ export async function main(ns) {
   const playRound = async () => {
     const state = readState(ns);
     if (!state || state.time <= lastStateTime) return;
+    if (Date.now() - state.time > STATE_MAX_AGE_MS) { waiting("corporation state is stale: waiting for services/corp-status.js to write a current one"); return; }
     let acted = false;
 
     // --reinvest-minutes: queue the growth requests regularly (each spends a share of the funds at that moment).

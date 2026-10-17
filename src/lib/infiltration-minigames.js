@@ -57,6 +57,29 @@ export function pressInfiltrateButton() {
   return true;
 }
 
+// Market demand (game code): demand = 1 - 0.001 x floors^2, clamped to 0..1 for the payout. Every infiltration adds its level
+// count to the floors when it is paid out (at its start time); the floors decay with exp(-2e-5 per ms) = 0.02 per second.
+// The payout uses the demand at the moment Start is pressed, and the start screen shows it, so waiting there is free.
+export const DEMAND_DECAY_PER_SECOND = 0.02;
+
+/** @param {number} demand @returns {number} the floors that give this demand */
+export function floorsForDemand(demand) {
+  return Math.sqrt(Math.max(0, 1 - demand) / 0.001);
+}
+
+/**
+ * The market demand the start screen shows, as a fraction (the game prints "0% (-37.5%)" when the raw value is negative).
+ * Null when no start screen is open.
+ * @returns {number | null}
+ */
+export function readMarketDemand() {
+  const element = findElement("li", (text) => text.startsWith("Market demand:"));
+  // the game formats with Intl and your locale: "77.5%" or "77,5 %" (maybe with a no-break space)
+  const match = element?.textContent?.match(/Market demand:\s*(-?[\d.,]+)\s*%(?:\s*\((-?[\d.,]+)\s*%\))?/);
+  const percent = match ? Number((match[2] ?? match[1]).replace(",", ".")) : NaN;
+  return Number.isNaN(percent) ? null : percent / 100;
+}
+
 /** Clicks "Sell for $..." on the success screen. @returns {boolean} whether the button was there */
 export function sellForMoney() {
   const button = /** @type {HTMLElement | undefined} */ (findElement("button", (text) => text.startsWith("Sell for")));
