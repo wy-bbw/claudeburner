@@ -133,8 +133,13 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   High science factor helps the rating: Pharmaceutical "sicko" (0.8) out-earned Tobacco 6x. Tools: corp-expand,
   corp-office, corp-boosts, corp-exports (generic from industry data), corp-adverts; the manager runs products for
   every product division.
-- With lots of home RAM, a single corporation script calling the API directly would replace the workers + request
-  queue (not done yet; the worker design still works on a 32 GB home at the start of a BitNode).
+- Manager logic lives in `lib/corp-manager-core.js`; two entries: `services/corp-manager.js` (worker version: state from
+  data/corp-state.txt, ~3 GB, for small homes) and `services/corp-manager-direct.js` (2026-10-17: reads the corporation API in
+  its own process via `lib/corp-direct.js`, no state file, ~113 GB; actions still go through the 21.6 GB workers, answering by
+  port 6, because all 20 write calls in one script would need ~510 GB). Run only one of them. Both ignore a state older than
+  90 s. Tools still queue requests in data/corp-requests.txt. A new division needs `tools/corp-add-division.js <name>` (the
+  manager only runs products/prices by itself); its office step spends `--budget-fraction` of funds, and a product main
+  office of 58 employees costs ~$200b (size 3 -> 30 ~ $58b), so Wilson/Advert purchases can starve it (`--hold-upgrades`).
 - Node is at `C:\Program Files\nodejs` — prepend to PATH in shells started before the install.
 
 ## Conventions

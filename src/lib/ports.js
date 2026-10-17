@@ -10,3 +10,5 @@ export const DARKNET_PASSWORDS_PORT = 3;
 export const DARKNET_VISITED_PORT = 4;
 /** One message: JSON {host: {threads, attempts, successes, last}} of every running workers/darknet-phish.js. Read with peek. */
 export const PHISHING_STATUS_PORT = 5;
+/** One message: JSON [{args, ok, error?}], the results of the corporation action worker that services/corp-manager-direct.js just ran. */
+export const CORPORATION_ACTION_PORT = 6;

@@ -3,7 +3,7 @@
 
 /**
  * Runs one corporation call per argument list from ns.args[0] (JSON) and writes [{args, ok, error?}] to
- * data/corp/do-<action>.txt.
+ * data/corp/do-<action>.txt, or, when ns.args[1] is a port number, to that port (no file; lib/corp-scripts.js runActionByPort).
  * @param {NS} ns @param {string} action @param {(args: any[]) => void} call
  */
 export function performCalls(ns, action, call) {
@@ -16,5 +16,7 @@ export function performCalls(ns, action, call) {
       return { args, ok: false, error: String(error) };
     }
   });
-  ns.write(`data/corp/do-${action}.txt`, JSON.stringify(results), "w");
+  const port = Number(ns.args[1]);
+  if (port) ns.writePort(port, JSON.stringify(results));
+  else ns.write(`data/corp/do-${action}.txt`, JSON.stringify(results), "w");
 }
