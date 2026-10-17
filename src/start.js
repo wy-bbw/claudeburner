@@ -5,7 +5,9 @@ const CONTROLLER = "services/controller.js";
 const BATCHER = "services/batcher.js"; // replaces the controller once Formulas.exe is owned
 const AGENT = "agent.js";
 // Optional services on home, started in this order while home has room next to the agent.
-const HOME_SERVICES = ["services/metrics.js", "services/coding-contracts.js", "services/server-buyer.js", "services/darknet-orchestrator.js"];
+// services/server-buyer.js is left out on purpose (2026-10-16): bought servers are of little value in BitNode 4 and the money is
+// needed elsewhere. Start it by hand (run services/server-buyer.js) if you want it again.
+const HOME_SERVICES = ["services/metrics.js", "services/coding-contracts.js", "services/darknet-orchestrator.js"];
 
 // Cold start after any reset (augmentation install or new BitNode), fits an 8 GB home:
 //   1. root every server the current port openers allow
