@@ -11,14 +11,23 @@
 //   `target` per second is MP + markupLimit x sqrt(potential / target) (what Market-TA.II sets).
 // - The product markup is hidden but fixed per product: measured once from a cycle that left stock while priced above
 //   MP + markup limit: markupLimit = (price - MP) x sqrt(sold / potential), markup = effectiveRating / markupLimit.
+//   Until then it is estimated from the game's own formula (Product.ts finishProduct): markup = 100 / ((1 +
+//   advertisingInvestment^0.1 / 100) x (quality + 0.001)^0.65 x (Business + Management share of the development office's job
+//   production)); the share is taken from that office now (the API does not show it from the development time), and the
+//   price is set ESTIMATE_OVERSHOOT above the estimated optimum so the first cycle leaves stock and the markup can be
+//   measured; if it still sells out, the overshoot grows by that factor each cycle.
 
 const SOLD_OUT_TOLERANCE = 0.01;
 const DRAIN_CYCLES = { product: 5, material: 1 };
+const ESTIMATE_OVERSHOOT = 1.5;
 
 /**
  * @typedef {{kind: "product" | "material", marketPrice: number, delta: number, sold: number, supply: number, leftover: number,
  *   quality: number, demand?: number, competition?: number, businessProduction: number, salesBotsLevel: number,
- *   awareness: number, popularity: number, advertisingFactor: number, baseMarkup?: number}} MarketItem
+ *   awareness: number, popularity: number, advertisingFactor: number, baseMarkup?: number, productQuality?: number,
+ *   advertisingInvestment?: number, developmentShare?: number}} MarketItem
+ *   productQuality = the product's quality stat; developmentShare = (Business + Management) / total job production of the
+ *   division's development office (both only for products, for the markup estimate)
  *   quality = material quality or product effective rating in this city; delta = current price above MP; sold, supply per second
  */
 
@@ -36,9 +45,19 @@ export function potentialSales(item) {
 }
 
 /**
+ * The product markup from the game's formula, with the current Business + Management share of the development office;
+ * null without the data. @param {MarketItem} item
+ */
+export function estimatedProductMarkup(item) {
+  if (item.productQuality === undefined || !item.developmentShare) return null;
+  const advertisingMultiplier = 1 + Math.max(0, item.advertisingInvestment ?? 0) ** 0.1 / 100;
+  return 100 / (advertisingMultiplier * (item.productQuality + 0.001) ** 0.65 * item.developmentShare);
+}
+
+/**
  * The Market-TA.II price above MP for one item in one city, or null when it cannot be computed yet (no demand data, or a
  * product whose markup is not measured and could not be measured from the last cycle): then probe instead.
- * @param {MarketItem} item @param {{markup?: number}} productMemory per product (shared by its cities), kept between calls
+ * @param {MarketItem} item @param {{markup?: number, overshoot?: number}} productMemory per product (shared by its cities), kept between calls
  * @returns {{delta: number, reason: string} | null}
  */
 export function marketTa2Delta(item, productMemory) {
@@ -55,8 +74,18 @@ export function marketTa2Delta(item, productMemory) {
       const measuredLimit = item.delta * Math.sqrt(item.sold / potential);
       if (measuredLimit > 0) productMemory.markup = Math.max(item.quality, 0.001) / measuredLimit;
     }
-    if (!productMemory.markup) return null;
-    markupLimit = Math.max(item.quality, 0.001) / productMemory.markup;
+    if (productMemory.markup) markupLimit = Math.max(item.quality, 0.001) / productMemory.markup;
+    else {
+      const estimate = estimatedProductMarkup(item);
+      if (!estimate) return null;
+      // Sold out at the estimated price: the estimate was too low a limit; overshoot more.
+      if (productMemory.overshoot && !stockLeft) productMemory.overshoot *= ESTIMATE_OVERSHOOT;
+      productMemory.overshoot ??= ESTIMATE_OVERSHOOT;
+      const limit = Math.max(item.quality, 0.001) / estimate * productMemory.overshoot;
+      const target = Math.max(item.supply, 1e-9) + item.leftover / (10 * DRAIN_CYCLES.product);
+      return { delta: limit * Math.sqrt(potential / target),
+        reason: `TA2 formula, markup estimated (${estimate.toPrecision(3)}, x${productMemory.overshoot.toFixed(2)} to measure it next cycle)` };
+    }
   }
   // How well the formula predicted the last cycle (logged; 1.00 = exact): sold = potential x min(1, (limit / delta)^2).
   const predicted = item.delta > markupLimit ? potential * (markupLimit / item.delta) ** 2 : potential;

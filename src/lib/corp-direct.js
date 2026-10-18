@@ -73,7 +73,7 @@ export async function runReader(ns, name, args) {
           effectiveRating: product.effectiveRating, desiredSellAmount: product.desiredSellAmount,
           desiredSellPrice: product.desiredSellPrice, stored: product.stored, productionAmount: product.productionAmount,
           actualSellAmount: product.actualSellAmount, productionCost: product.productionCost,
-          demand: product.demand, competition: product.competition,
+          demand: product.demand, competition: product.competition, quality: product.stats.quality,
           designInvestment: product.designInvestment, advertisingInvestment: product.advertisingInvestment,
         };
       })));

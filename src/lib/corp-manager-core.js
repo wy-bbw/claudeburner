@@ -290,6 +290,19 @@ function productDivisionsOf(state, flags) {
 }
 
 /**
+ * (Business + Management) / total job production of a product division's development office: the share in the product
+ * markup formula (lib/corp-market.js estimate). undefined without that office.
+ * @param {any} state @param {string} divisionName
+ */
+function developmentShareOf(state, divisionName) {
+  const city = developmentCityOf(state, divisionName);
+  const office = (state.offices ?? []).find((/** @type {any} */ entry) => entry.division === divisionName && entry.city === city);
+  const production = office?.employeeProductionByJob;
+  if (!production?.total) return undefined;
+  return ((production.Business ?? 0) + (production.Management ?? 0)) / production.total;
+}
+
+/**
  * The development city of a product division (mainCityOf with --city), null for divisions without products.
  * @param {any} state @param {string} divisionName
  * @returns {string | null}
@@ -406,6 +419,8 @@ function priceOrders(products, materials, memory, market) {
       awareness: division.awareness ?? 0, popularity: division.popularity ?? 0,
       advertisingFactor: industryData?.industries?.[division.industry]?.advertisingFactor ?? 0,
       baseMarkup: industryData?.baseMarkups?.[entry.name],
+      productQuality: /** @type {any} */ (entry).quality, advertisingInvestment: /** @type {any} */ (entry).advertisingInvestment,
+      developmentShare: kind === "product" ? developmentShareOf(state, entry.division) : undefined,
     }, memory.get(productKey)) : null;
     const next = formula ?? nextPriceDelta({ marketPrice, delta, sold: entry.actualSellAmount, supply, leftover: entry.stored, startDelta, kind },
       /** @type {{calibrated?: boolean}} */ (memory.get(key)));
