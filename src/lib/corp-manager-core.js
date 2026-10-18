@@ -55,8 +55,9 @@ const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
 //   researched, products use the game's own. --fixed-material-prices leaves materials alone.
 // - Energy and morale: tea and a party for every office more than 2 below the maximum (what the AutoBrew and
 //   AutoPartyManager research do, without spending RP).
-// - Wilson Analytics when it costs <= --wilson-fraction of funds, then Advert levels for each product division while each costs
-//   <= --advert-fraction of funds (Wilson first: it multiplies every later Advert).
+// - Wilson Analytics when it costs <= --wilson-fraction of funds (default 80%), then Advert levels for each product division
+//   while each costs <= --advert-fraction of funds. Wilson first and generously: every later Advert multiplies awareness and
+//   popularity by 1.005 x the Wilson multiplier (game code applyAdVert), so its effect compounds over all later Adverts.
 // Decisions use the corporation state read from the API in this process each round (lib/corp-direct.js: no state file);
 // after acting it waits for a newer state. Every action is its own 20 GB worker (workers/corp-do-*.js, answers by port).
 // Price calibrations live in RAM and are re-learned after a restart. Log: data/corp-manager.txt; current prices:
@@ -83,7 +84,7 @@ export async function runCorporationManager(ns) {
     ["division", "all"],
     ["city", "Aevum"],
     ["invest-fraction", 0.0002],
-    ["wilson-fraction", 0.2],
+    ["wilson-fraction", 0.8],
     ["advert-fraction", 0.1],
     ["hold-upgrades", false],
     ["upkeep-and-prices-only", false],
