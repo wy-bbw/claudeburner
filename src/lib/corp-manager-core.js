@@ -51,9 +51,10 @@ const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
 //   the lowest rating is discontinued first. Design and marketing investment: --invest-fraction of funds each
 //   (default 0.02%: the effect grows only with investment^0.1, so large sums buy little).
 //   Finished products get a sell order (MAX) in all cities.
-// - Prices like Market-TA.II for every product and every produced material that sells "MAX" at "MP" or "MP+x"
-//   (lib/corp-pricing.js), without the 70k RP research. Prices set by hand are left alone. Once Market-TA.II is
-//   researched, products use the game's own. --fixed-material-prices leaves materials alone.
+// - Prices like Market-TA.II for every product and every produced material that sells "MAX" at "MP" or "MP+x", without
+//   the 70k RP research: the game's TA2 formula (lib/corp-market.js), which needs the "Market Research - Demand" and
+//   "Market Data - Competition" unlocks; without them no prices are set at all. Prices set by hand are left alone. Once
+//   Market-TA.II is researched, products use the game's own. --fixed-material-prices leaves materials alone.
 // - Energy and morale: tea and a party for every office more than 2 below the maximum (what the AutoBrew and
 //   AutoPartyManager research do, without spending RP).
 // - Wilson Analytics when it costs <= --wilson-fraction of funds (default 80%), then Advert levels for each product division
@@ -101,6 +102,7 @@ export async function runCorporationManager(ns) {
   const marketTa2Products = new Set();
   /** @type {Map<string, {calibrated?: boolean}>} pricing memory per item and city */
   const priceMemory = new Map();
+  let lastPricingNote = "";
   let lastStateTime = 0, lastPriceChange = 0, lastRequestTime = 0, lastReinvest = Date.now() - Math.max(0, Number(flags["reinvest-minutes"]) * 60_000 - FIRST_REINVEST_DELAY_MS), lastWaiting = "";
   const log = (/** @type {string} */ event, /** @type {string} */ details) => appendLog(ns, LOG_FILE, event, details);
   const waiting = (/** @type {string} */ reason) => {
@@ -187,6 +189,10 @@ export async function runCorporationManager(ns) {
         material.productionAmount > 0);
       const pricing = priceOrders(productEntries, materialEntries, priceMemory, { state, industryData: await readIndustryData(ns, state) });
       writePrices(ns, pricing.lines);
+      // Logged once (and again when it changes): waiting() is also used by the product check every round.
+      const pricingNote = pricing.withoutMarketData ? "prices left alone: no demand/competition data (buy the \"Market Research - Demand\" and \"Market Data - Competition\" unlocks)" : "";
+      if (pricingNote !== lastPricingNote && pricingNote) log("prices", pricingNote);
+      lastPricingNote = pricingNote;
       if (pricing.productOrders.length) await report(ns, log, "sell-product", pricing.productOrders, false);
       if (pricing.materialOrders.length) await report(ns, log, "sell-material", pricing.materialOrders, false);
       if (pricing.productOrders.length || pricing.materialOrders.length) {
@@ -357,8 +363,8 @@ async function readIndustryData(ns, state) {
 
 /**
  * New sell orders for every product and material whose price is "MP" or "MP+x": the Market-TA.II formula
- * (lib/corp-market.js) when demand and competition are visible (the two market research unlocks) and, for a product, its
- * markup is known; otherwise probing and measuring (lib/corp-pricing.js).
+ * (lib/corp-market.js); a product whose markup is not measured yet is probed (lib/corp-pricing.js) until one cycle leaves
+ * stock and the markup can be measured. Nothing without demand and competition data (the two market research unlocks).
  * @param {ProductData[]} products @param {MaterialData[]} materials @param {Map<string, any>} memory
  * @param {{state: any, industryData: any}} market
  */
@@ -376,10 +382,14 @@ function priceOrders(products, materials, memory, market) {
     ...materials.map((material) => ({ kind: /** @type {const} */ ("material"), entry: material, marketPrice: material.marketPrice, supply: material.actualSellAmount,
       startDelta: undefined })),
   ];
+  let withoutMarketData = 0;
   for (const { kind, entry, marketPrice, supply, startDelta } of items) {
     if (String(entry.desiredSellAmount) !== "MAX" || marketPrice <= 0) continue;
     const delta = parsePriceDelta(entry.desiredSellPrice);
     if (delta === null) continue;
+    // No prices without Demand and Competition: the API leaves both undefined until "Market Research - Demand" and
+    // "Market Data - Competition" are unlocked (checking hasUnlock would cost 10 GB). The price stays as it is.
+    if (/** @type {any} */ (entry).demand == null || /** @type {any} */ (entry).competition == null) { withoutMarketData++; continue; }
     const key = `${entry.division}/${entry.city}/${entry.name}`;
     if (!memory.has(key)) memory.set(key, {});
     const division = state.divisions.find((/** @type {any} */ candidate) => candidate.name === entry.division);
@@ -406,7 +416,7 @@ function priceOrders(products, materials, memory, market) {
     if (kind === "product") productOrders.push([entry.division, entry.city, entry.name, "MAX", price, false]);
     else materialOrders.push([entry.division, entry.city, entry.name, "MAX", price]);
   }
-  return { productOrders, materialOrders, lines };
+  return { productOrders, materialOrders, lines, withoutMarketData };
 }
 
 /**
