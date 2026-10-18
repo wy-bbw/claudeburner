@@ -1,6 +1,6 @@
 import { appendLog } from "lib/log.js";
 import { runAction, runReader } from "lib/corp-scripts.js";
-import { BOOST_MATERIALS, optimalBoosts, warehouseUpgradeCost } from "lib/corp-boosts.js";
+import { BOOST_MATERIALS, bestBoostPurchase, boostSpaceFor, warehouseUpgradeCost } from "lib/corp-boosts.js";
 import { upgradeCost } from "lib/corp-upgrades.js";
 import { JOBS, officeUpgradeCost } from "lib/corp-offices.js";
 
@@ -231,16 +231,21 @@ async function planStep(ns, entry, snapshot, planned, flags, say) {
       for (const warehouse of warehouses) {
         // Dry run: the size the earlier planned steps give; a real run reads the actual size.
         const size = go ? warehouse.size : plannedSize(planned.levels.get(warehouse.city) ?? warehouse.level, planned.smartStorage);
-        const target = optimalBoosts(size * fill, data.industries[info.industry].factors, data.sizes);
+        // Best mix on top of what the warehouse holds (lib/corp-boosts.js bestBoostPurchase): held stock counts against the
+        // space (an overstocked material shrinks the others), no budget limit (the fill goes on debt).
+        const rows = materials.filter((/** @type {{city: string}} */ entryRow) => entryRow.city === warehouse.city);
+        const held = Object.fromEntries(BOOST_MATERIALS.map((material) => [material, rows.find((/** @type {{name: string}} */ entryRow) => entryRow.name === material)?.stored ?? 0]));
+        const prices = Object.fromEntries(BOOST_MATERIALS.map((material) => [material,
+          rows.find((/** @type {{name: string}} */ entryRow) => entryRow.name === material)?.marketPrice || data.baseCosts[material]]));
+        const heldSpace = BOOST_MATERIALS.reduce((sum, material) => sum + held[material] * data.sizes[material], 0);
+        const space = boostSpaceFor(size, Math.max(0, warehouse.sizeUsed - heldSpace), fill);
+        const purchase = bestBoostPurchase(space, held, prices, Infinity, data.industries[info.industry].factors, data.sizes);
         const parts = [];
-        for (const material of BOOST_MATERIALS) {
-          const row = materials.find((/** @type {{city: string, name: string}} */ entryRow) => entryRow.city === warehouse.city && entryRow.name === material);
-          const amount = Math.max(0, target[material] - Math.floor(row?.stored ?? 0));
-          if (!amount) continue;
+        for (const [material, amount] of Object.entries(purchase.purchases)) {
           calls.push([division, warehouse.city, material, amount]);
-          cost += amount * (row?.marketPrice ?? data.baseCosts[material]);
           parts.push(`${material} ${amount}`);
         }
+        cost += purchase.cost;
         lines.push(`${warehouse.city} (${Math.round(size)} storage, ${Math.round(fill * 100)}%): ${parts.join(", ") || "full"}`);
       }
       run = async () => { if (calls.length) await act(ns, say, "bulk-purchase", calls); };

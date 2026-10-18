@@ -121,7 +121,7 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   Request tools (1.6 GB, queue a JSON line in data/corp-requests.txt; corp-manager runs one per round on a state read
   after the previous request, `--dry-run` logs the plan): `tools/corp-upgrades.js --budget-fraction f` (Smart
   Factories/Storage, employee upgrades, Project Insight; cheapest level first), `tools/corp-boosts.js --division d
-  --budget-fraction f [--fill 0.6]` (highest warehouse level + Lagrange boosts within budget), `tools/corp-office.js
+  --budget-fraction f [--fill 0.6]` (since 2026-10-18: the warehouse level + boost mix with the highest production multiplier within the budget; held stock is kept and counts against the space, a budget too small to fill still buys the best partial mix: `lib/corp-boosts.js` bestBoostPurchase, KKT amount = max(held, factor / (lambda x size + mu x price) - 500)), `tools/corp-office.js
   --division d --city c|all --size n|--budget-fraction f [--jobs "Operations:4,Engineer:22,..."]` (grow, hire,
   ceil(size/9) interns first, split). The manager also buys tea and throws parties below max energy/morale - 2.
   The game silently ignores office/warehouse upgrades it cannot afford (workers then report ok).
