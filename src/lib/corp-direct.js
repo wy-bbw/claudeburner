@@ -1,7 +1,7 @@
 import { BOOST_MATERIALS } from "lib/corp-boosts.js";
 import { readCorporationState } from "lib/corp-state.js";
 
-// The corporation API called in this process, for services/corp-manager-direct.js: no state file, no reader scripts.
+// The corporation API called in this process, for services/corp-manager.js: no state file, no reader scripts.
 // Each reader below is the body of workers/corp-read-<name>.js (same output), returning the data instead of writing a file.
 // RAM: every distinct corporation call used in this file costs 10 GB (11 calls ~ 110 GB). The 20 GB action calls stay in
 // the workers (lib/corp-scripts.js runActionByPort): all of them in one script would not fit into 512 GB.
@@ -92,6 +92,7 @@ export async function runReader(ns, name, args) {
         return [industry, {
           factors: { "Real Estate": data.realEstateFactor ?? 0, Hardware: data.hardwareFactor ?? 0, Robots: data.robotFactor ?? 0, "AI Cores": data.aiCoreFactor ?? 0 },
           requiredMaterials: data.requiredMaterials, producedMaterials: data.producedMaterials ?? [], makesProducts: data.makesProducts,
+          scienceFactor: data.scienceFactor ?? 0,
         }];
       }));
       const materials = BOOST_MATERIALS.map((material) => corporation.getMaterialData(material));

@@ -110,14 +110,14 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 - `node bridge/cli.mjs …` — talks to the bridge (control port 12526): `status | sync | ls | get <file> | ram <file>… | run <script> [-h host] [-t N] [args] | call <method> [json]`.
 - After every reset (augmentation install or new BitNode) the user types `run start.js`: it roots, starts the hacking service on the biggest rooted server (`services/batcher.js` with Formulas.exe, else `controller.js`; the controller runs start.js itself once Formulas.exe appears, and start.js kills it), metrics if home has room, then spawns `agent.js` (fits an 8 GB home). `agent.js` must be running on home. It executes `cli run` commands; for remote hosts it scp's all `.js` first.
 - In corporation BitNodes use `run start-corporation.js` instead: services/corp-status.js + services/corp-manager.js +
-  agent.js only, no hacking or hacking-economy home services (corp calls cost 10-20 GB each, home has 32 GB). start.js
+  agent.js only, no hacking or hacking-economy home services (corp calls cost 10-20 GB each; corp-manager.js needs ~115 GB + 21.6 GB). start.js
   would start those again. Corp scripts: one corporation function per worker script (`workers/corp-read-*.js` 11.6 GB,
   `workers/corp-do-<action>.js` 21.6 GB, taking a JSON list of calls), run one at a time via `lib/corp-scripts.js`
   (waits for free RAM). corp-manager.js: products (develop, discontinue the worst, sell), custom Market-TA.II pricing
   for products and materials (`lib/corp-pricing.js`: C = sold x (price-MP)^2 from a cycle with stock left, price =
   MP + sqrt(C/supply); log data/corp-manager.txt, prices data/corp-prices.txt), Wilson + Advert (`--hold-upgrades`
   before accepting an offer). `tools/corp-exports.js` sets the Agriculture/Chemical/Tobacco exports + Smart Supply
-  options; a tool's 21.6 GB worker does not fit next to corp-manager on 32 GB: kill corp-manager, run the tool, restart.
+  options.
   Request tools (1.6 GB, queue a JSON line in data/corp-requests.txt; corp-manager runs one per round on a state read
   after the previous request, `--dry-run` logs the plan): `tools/corp-upgrades.js --budget-fraction f` (Smart
   Factories/Storage, employee upgrades, Project Insight; cheapest level first), `tools/corp-boosts.js --division d
@@ -125,6 +125,21 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   --division d --city c|all --size n|--budget-fraction f [--jobs "Operations:4,Engineer:22,..."]` (grow, hire,
   ceil(size/9) interns first, split). The manager also buys tea and throws parties below max energy/morale - 2.
   The game silently ignores office/warehouse upgrades it cannot afford (workers then report ok).
+- Startup (2026-10-18): `services/corp-startup.js` (2.9 GB, dry run unless `--go`; `--phase startup|after-round-1`, `--only <step>`) does the
+  startup recipe (memory note corp-startup-recipe) step by step through the corp workers (new `workers/corp-do-purchase-unlock.js`).
+  Create the corporation and the Agriculture division by hand first; do not run the corp manager during startup.
+  `services/corp-growth.js` is an older blank stub.
+- Product formulas (game source v3.0.1, github bitburner-official/bitburner-src src/Corporation/Product.ts, Division.ts; the Steam
+  folder is not readable from the sandbox): only the creation city's office develops a product; markup = 100 / (quality^0.65 x
+  (Business+Management share)), so Market-TA.II revenue ~ rating^1.325 x quality^0.65 x that share (best ~36% Engineers / 64%
+  Management); development speed = 0.01 x (Eng^0.34 + Ops^0.2) x (1 + Mgmt / (1.2 x (Ops+Eng+Mgmt))); rating x (1 + RP^researchFactor
+  / 800); RP per office = 0.004 x sqrt(R&D production) -> spread R&D. Effective rating = min(rating, input quality x sqrt(rating));
+  material quality = min(q, input quality x sqrt(q)), q = Eng/90 + RP^scienceFactor + AI Cores^aiFactor/1e4; Smart Supply buys at
+  quality 1 (dilutes the stock). Staffing in the manager (`lib/corp-staffing.js`, user's rules 2026-10-18): 50% R&D everywhere
+  (`--mode grow` = 20%) except the development city, which gets the fastest-development split (~5% Ops, 47% Eng, 47% Mgmt); every
+  other office the revenue split for its goal (production when mostly exported, sales when < 95% of output sells, else
+  balanced sqrt(production x business)); suppliers of input-quality-limited consumers grow (offices + warehouse/boosts, log "quality").
+  `~/develop/bitburner/bitburner` is an old v1.3.0 checkout: do not use it for formulas.
 - Product bomb recipe (worked 2026-10-16: profit $190t/s -> $2.4q/s in 6 minutes): basic machinery first
   (Agriculture -> Chemical -> products, exports, pricing), then Wilson Analytics as high as possible (each Advert
   purchase uses the Wilson multiplier at the time of purchase: buy Wilson BEFORE Advert), then a NEW product division
@@ -133,11 +148,11 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   High science factor helps the rating: Pharmaceutical "sicko" (0.8) out-earned Tobacco 6x. Tools: corp-expand,
   corp-office, corp-boosts, corp-exports (generic from industry data), corp-adverts; the manager runs products for
   every product division.
-- Manager logic lives in `lib/corp-manager-core.js`; two entries: `services/corp-manager.js` (worker version: state from
-  data/corp-state.txt, ~3 GB, for small homes) and `services/corp-manager-direct.js` (2026-10-17: reads the corporation API in
-  its own process via `lib/corp-direct.js`, no state file, ~113 GB; actions still go through the 21.6 GB workers, answering by
-  port 6, because all 20 write calls in one script would need ~510 GB). Run only one of them. Both ignore a state older than
-  90 s. Tools still queue requests in data/corp-requests.txt. A new division needs `tools/corp-add-division.js <name>` (the
+- Manager logic lives in `lib/corp-manager-core.js`, entry `services/corp-manager.js` (since 2026-10-18 the only variant: the
+  old worker/state-file version was removed and the former corp-manager-direct.js took its name). It reads the corporation API
+  in its own process via `lib/corp-direct.js` (no state file, ~113 GB); actions still go through the 21.6 GB workers, answering
+  by port 6, because all 20 write calls in one script would need ~510 GB. Price calibrations are not kept across restarts.
+  data/corp-state.txt is now only the dashboard feed of services/corp-status.js (and services/corp-upkeep.js). Tools still queue requests in data/corp-requests.txt. A new division needs `tools/corp-add-division.js <name>` (the
   manager only runs products/prices by itself); its office step spends `--budget-fraction` of funds, and a product main
   office of 58 employees costs ~$200b (size 3 -> 30 ~ $58b), so Wilson/Advert purchases can starve it (`--hold-upgrades`).
 - Node is at `C:\Program Files\nodejs` — prepend to PATH in shells started before the install.

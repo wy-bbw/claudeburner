@@ -1,7 +1,7 @@
 import { BOOST_MATERIALS } from "lib/corp-boosts.js";
 
 // corp-read-industry-data.js <JSON list of industry names>: started by services/corp-manager.js (two corporation calls,
-// 10 GB each): per industry the boost factors, required and produced materials; per boost material its size and base
+// 10 GB each): per industry the boost factors, science factor, required and produced materials; per boost material its size and base
 // cost -> data/corp/industry-data.txt
 /** @param {NS} ns */
 export async function main(ns) {
@@ -11,6 +11,7 @@ export async function main(ns) {
     return [industry, {
       factors: { "Real Estate": data.realEstateFactor ?? 0, Hardware: data.hardwareFactor ?? 0, Robots: data.robotFactor ?? 0, "AI Cores": data.aiCoreFactor ?? 0 },
       requiredMaterials: data.requiredMaterials, producedMaterials: data.producedMaterials ?? [], makesProducts: data.makesProducts,
+      scienceFactor: data.scienceFactor ?? 0,
     }];
   }));
   const materials = BOOST_MATERIALS.map((material) => ns.corporation.getMaterialData(material));

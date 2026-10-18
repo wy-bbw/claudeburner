@@ -1,6 +1,6 @@
 // Collects the corporation's state with a "reader" function: runReader(ns, name, args) -> the data of one corporation call
-// family. services/corp-status.js passes the worker-script version (lib/corp-scripts.js, results through files),
-// services/corp-manager-direct.js the in-process version (lib/corp-direct.js). The result has the shape of data/corp-state.txt.
+// family. services/corp-status.js (dashboard) passes the worker-script version (lib/corp-scripts.js, results through files),
+// services/corp-manager.js the in-process version (lib/corp-direct.js). The result has the shape of data/corp-state.txt.
 
 // Researches the product services act on (services/corp-manager.js turns Market-TA.II on for every product).
 const WATCHED_RESEARCH = ["Market-TA.I", "Market-TA.II"];

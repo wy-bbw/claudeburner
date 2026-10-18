@@ -4,15 +4,13 @@ import { AUTO_UPGRADES, planUpgrades } from "lib/corp-upgrades.js";
 import { JOBS, jobSplit, largestAffordableSize, officeUpgradeCost } from "lib/corp-offices.js";
 import { upkeepCalls } from "lib/corp-upkeep.js";
 import { formatPrice, nextPriceDelta, parsePriceDelta } from "lib/corp-pricing.js";
+import { readStateDirect, runReader } from "lib/corp-direct.js";
+import { runActionByPort } from "lib/corp-scripts.js";
+import { inputLimitedConsumers, officeJobs, suppliersFor } from "lib/corp-staffing.js";
 
-// A state older than this is not the current company (the file mode reads corp-status.js's snapshot, written every ~20 s): after a
-// restart or a new BitNode the file still holds the previous corporation, and acting on it buys things for divisions that do not exist.
-const STATE_MAX_AGE_MS = 90_000;
 const LOG_FILE = "data/corp-manager.txt";
 const PRICES_FILE = "data/corp-prices.txt";
 const REQUESTS_FILE = "data/corp-requests.txt";
-// Which prices are calibrated (lib/corp-pricing.js memory), kept across restarts: uncalibrated prices probe x3.
-const PRICE_MEMORY_FILE = "data/corp-price-memory.txt";
 const INTERVAL_MS = 5_000;
 const WILSON = "Wilson Analytics";
 // Upgrade cost = base price x price multiplier ^ level (game code).
@@ -21,24 +19,19 @@ const ADVERT_BASE_PRICE = 1e9, ADVERT_PRICE_MULT = 1.06;
 const MAX_ADVERTS_PER_ROUND = 20;
 // A restart must not postpone the growth by the whole --reinvest-minutes: the first reinvest comes this long after the start.
 const FIRST_REINVEST_DELAY_MS = 120_000;
-// Suppliers sell little and mostly export: no Business, mostly Operations and Management (production = Ops/Eng/Mgmt).
-const SUPPLIER_JOBS = { Operations: 4, Engineer: 2, Management: 4, Business: 1 };
+// Staffing (lib/corp-staffing.js, from the game code v3.0.1): every office puts researchShare of its workers on R&D (product
+// rating and material quality), except a product division's development city, which gets the fastest-development split;
+// the rest of every office gets the split with the most revenue (production, sales or both, judged from last cycle).
+// Applied to every office in each reinvest round. --mode grow = 20% R&D (profit first), maintain = 50% (default).
+const RESEARCH_SHARE_BY_MODE = { grow: 0.2, maintain: 0.5 };
+let researchShare = RESEARCH_SHARE_BY_MODE.maintain;
+// Boost fill of the warehouse space when the manager buys boosts (the startup recipe's 83%; the rest holds inputs and output).
+const BOOST_FILL = 0.83;
+/** @type {CityName} */
+let developmentCity = "Aevum";
 const ALL_CITIES = /** @type {CityName[]} */ (["Sector-12", "Aevum", "Chongqing", "New Tokyo", "Ishima", "Volhaven"]);
 // The corporation guide's export amount: exactly what the importer will use next cycle, minus what it still has.
 const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
-
-/**
- * How the manager reaches the game. Two implementations: services/corp-manager.js (state from data/corp-state.txt, actions in
- * worker scripts, results in files) and services/corp-manager-direct.js (state read from the corporation API in this process).
- * @typedef {{
- *   runAction: (ns: NS, action: string, calls: unknown[][]) => Promise<{args: unknown[], ok: boolean, error?: string}[]>,
- *   runReader: (ns: NS, name: string, args: string[]) => Promise<any>,
- *   readState: (ns: NS) => Promise<any> | any,
- *   persistPriceMemory: boolean,
- * }} CorporationRuntime
- */
-/** @type {CorporationRuntime} */
-let io;
 
 /**
  * @typedef {{division: string, city: CityName, name: string, developmentProgress: number, rating: number,
@@ -64,9 +57,9 @@ let io;
 //   AutoPartyManager research do, without spending RP).
 // - Wilson Analytics when it costs <= --wilson-fraction of funds, then Advert levels for each product division while each costs
 //   <= --advert-fraction of funds (Wilson first: it multiplies every later Advert).
-// Decisions use the corporation state of runtime.readState: file mode = data/corp-state.txt (services/corp-status.js, every
-// 20 s), direct mode = read from the corporation API right now; after acting it waits for a newer state.
-// Every action is its own 20 GB worker (workers/corp-do-*.js). Log: data/corp-manager.txt; current prices:
+// Decisions use the corporation state read from the API in this process each round (lib/corp-direct.js: no state file);
+// after acting it waits for a newer state. Every action is its own 20 GB worker (workers/corp-do-*.js, answers by port).
+// Price calibrations live in RAM and are re-learned after a restart. Log: data/corp-manager.txt; current prices:
 // data/corp-prices.txt (rewritten every pricing round).
 // - Requests queued by tools in data/corp-requests.txt (JSON lines), one per round so each sees a fresh state:
 //   tools/corp-boosts.js (warehouse levels + optimal boost materials), tools/corp-upgrades.js (corporation upgrades),
@@ -79,11 +72,12 @@ let io;
 // (each request spends its share of the funds when it runs).
 // --upkeep-and-prices-only: only tea/parties, prices and requests queued by hand (no products, Wilson/Advert or
 // reinvestment; for running the corporation by hand).
+// --mode maintain|grow (default maintain, for a mature company): R&D share of every office, 50% (research first) or 20%
+// (profit first), reassigned in every reinvest round. Growing a young company toward investors needs its own strategy.
 // --hold-upgrades stops Wilson/Advert purchases (e.g. while waiting for an investment offer: spending lowers it).
-// Usage: run services/corp-manager.js [--division all|tobacco,sicko] [--city Aevum]   (or services/corp-manager-direct.js)
-/** @param {NS} ns @param {CorporationRuntime} runtime */
-export async function runCorporationManager(ns, runtime) {
-  io = runtime;
+// Usage: run services/corp-manager.js [--division all|tobacco,sicko] [--city Aevum]
+/** @param {NS} ns */
+export async function runCorporationManager(ns) {
   ns.disableLog("ALL");
   const flags = ns.flags([
     ["division", "all"],
@@ -95,12 +89,16 @@ export async function runCorporationManager(ns, runtime) {
     ["upkeep-and-prices-only", false],
     ["fixed-material-prices", false],
     ["reinvest-minutes", 5],
+    ["mode", "maintain"],
   ]);
+  if (!(String(flags.mode) in RESEARCH_SHARE_BY_MODE)) throw new Error(`--mode must be grow or maintain, not ${flags.mode}`);
+  researchShare = RESEARCH_SHARE_BY_MODE[/** @type {"grow" | "maintain"} */ (String(flags.mode))];
   const preferredCity = /** @type {CityName} */ (String(flags.city));
+  developmentCity = preferredCity;
   /** "<division>/<product>" that already have Market-TA.II turned on (not visible in the product data). */
   const marketTa2Products = new Set();
   /** @type {Map<string, {calibrated?: boolean}>} pricing memory per item and city */
-  const priceMemory = new Map(Object.entries((io.persistPriceMemory ? readJson(ns, PRICE_MEMORY_FILE) : null) ?? {}));
+  const priceMemory = new Map();
   let lastStateTime = 0, lastPriceChange = 0, lastRequestTime = 0, lastReinvest = Date.now() - Math.max(0, Number(flags["reinvest-minutes"]) * 60_000 - FIRST_REINVEST_DELAY_MS), lastWaiting = "";
   const log = (/** @type {string} */ event, /** @type {string} */ details) => appendLog(ns, LOG_FILE, event, details);
   const waiting = (/** @type {string} */ reason) => {
@@ -111,9 +109,8 @@ export async function runCorporationManager(ns, runtime) {
 
   // One round: requests, upkeep, prices, products, Wilson/Advert. An error is logged and the next round tries again.
   const playRound = async () => {
-    const state = await io.readState(ns);
+    const state = await readStateDirect(ns);
     if (!state || state.time <= lastStateTime) return;
-    if (Date.now() - state.time > STATE_MAX_AGE_MS) { waiting("corporation state is stale: waiting for services/corp-status.js to write a current one"); return; }
     let acted = false;
 
     // --reinvest-minutes: queue the growth requests regularly (each spends a share of the funds at that moment).
@@ -123,22 +120,32 @@ export async function runCorporationManager(ns, runtime) {
       const time = Date.now();
       // Office and boost shares are split over the product divisions (each request takes its share of the funds left).
       const growing = productDivisionsOf(state, flags);
-      // Suppliers that cannot feed their importers also grow (5% offices + 5% boosts of the funds, split over them).
-      const suppliers = starvedSuppliers(state).filter((name) => !growing.some((entry) => entry.name === name));
+      // Suppliers grow too (5% offices + 5% boosts of the funds, split over them): those that cannot feed their importers
+      // (the rest is bought at quality 1) and those whose consumers' output quality is capped by their input quality.
+      const industries = [...new Set(state.divisions.map((/** @type {any} */ entry) => entry.industry))];
+      const limited = inputLimitedConsumers(state, await runReader(ns, "industry-data", [JSON.stringify(industries)]));
+      const quality = suppliersFor(state, limited);
+      for (const consumer of limited) log("quality", `${consumer.division} ${consumer.city}: ${consumer.reason} -> grow the suppliers of ${consumer.inputs.join(", ")}`);
+      if (quality.unsupplied.length) log("quality", `no supplier division for ${quality.unsupplied.join("; ")} (bought at quality 1)`);
+      const suppliers = [...new Set([...starvedSuppliers(state), ...quality.suppliers])].filter((name) => !growing.some((entry) => entry.name === name));
+      // Every other division (budget 0: no growth) is reassigned too, so the R&D share holds everywhere in every round.
+      const covered = new Set([...growing.map((entry) => entry.name), ...suppliers]);
+      const reassigned = state.divisions.filter((/** @type {{name: string}} */ entry) => !covered.has(entry.name));
       const reinvest = [
         { type: "upgrades", names: AUTO_UPGRADES, budgetFraction: 0.2, time },
+        ...reassigned.map((/** @type {{name: string}} */ entry) => ({ type: "office", division: entry.name, city: "all", size: 0, budgetFraction: 0, jobs: null, time })),
         ...growing.flatMap((entry, index) => [
           { type: "office", division: entry.name, city: mainCityOf(entry, preferredCity), size: 0, budgetFraction: 0.15 / (growing.length - index), jobs: null, time },
           { type: "office", division: entry.name, city: "all", size: 0, budgetFraction: 0.1 / (growing.length - index), jobs: null, time },
-          { type: "boosts", division: entry.name, budgetFraction: 0.1 / (growing.length - index), fill: 0.6, time },
+          { type: "boosts", division: entry.name, budgetFraction: 0.1 / (growing.length - index), fill: BOOST_FILL, time },
         ]),
         ...suppliers.flatMap((name, index) => [
-          { type: "office", division: name, city: "all", size: 0, budgetFraction: 0.05 / (suppliers.length - index), jobs: SUPPLIER_JOBS, time },
-          { type: "boosts", division: name, budgetFraction: 0.05 / (suppliers.length - index), fill: 0.6, time },
+          { type: "office", division: name, city: "all", size: 0, budgetFraction: 0.05 / (suppliers.length - index), jobs: null, time },
+          { type: "boosts", division: name, budgetFraction: 0.05 / (suppliers.length - index), fill: BOOST_FILL, time },
         ]),
       ];
       ns.write(REQUESTS_FILE, reinvest.map((request) => JSON.stringify(request) + "\n").join(""), "a");
-      log("reinvest", `queued upgrades 20%; main office 15%, all offices 10%, boosts 10% of funds split over ${growing.map((entry) => entry.name).join(", ") || "no product division"}; starved suppliers (5% + 5%): ${suppliers.join(", ") || "none"}`);
+      log("reinvest", `queued upgrades 20%; main office 15%, all offices 10%, boosts 10% of funds split over ${growing.map((entry) => entry.name).join(", ") || "no product division"}; suppliers (starved or quality-limited consumers, 5% + 5%): ${suppliers.join(", ") || "none"}`);
     }
 
     // Requests from tools (they only queue a line: the workers need the RAM a running tool would take).
@@ -179,7 +186,6 @@ export async function runCorporationManager(ns, runtime) {
         material.productionAmount > 0);
       const pricing = priceOrders(productEntries, materialEntries, priceMemory);
       writePrices(ns, pricing.lines);
-      if (io.persistPriceMemory) ns.write(PRICE_MEMORY_FILE, JSON.stringify(Object.fromEntries(priceMemory)), "w");
       if (pricing.productOrders.length) await report(ns, log, "sell-product", pricing.productOrders, false);
       if (pricing.materialOrders.length) await report(ns, log, "sell-material", pricing.materialOrders, false);
       if (pricing.productOrders.length || pricing.materialOrders.length) {
@@ -274,6 +280,16 @@ function productDivisionsOf(state, flags) {
   const wanted = String(flags.division);
   return state.divisions.filter((/** @type {{name: string, makesProducts: boolean, cities: string[]}} */ entry) =>
     entry.makesProducts && entry.cities.length && (wanted === "all" || wanted.split(",").includes(entry.name)));
+}
+
+/**
+ * The development city of a product division (mainCityOf with --city), null for divisions without products.
+ * @param {any} state @param {string} divisionName
+ * @returns {string | null}
+ */
+function developmentCityOf(state, divisionName) {
+  const division = state.divisions.find((/** @type {{name: string}} */ entry) => entry.name === divisionName);
+  return division?.makesProducts && division.cities.length ? mainCityOf(division, developmentCity) : null;
 }
 
 /**
@@ -377,15 +393,6 @@ function writePrices(ns, lines) {
   if (lines.length) ns.write(PRICES_FILE, `${formatTime()}  new prices (item, price, sales, reason):\n${lines.join("\n")}\n`, "w");
 }
 
-/** @param {NS} ns @param {string} file */
-function readJson(ns, file) {
-  try {
-    return JSON.parse(ns.read(file));
-  } catch {
-    return null;
-  }
-}
-
 /**
  * tools/corp-adverts.js request: as many Advert levels for one division as a share of funds buys.
  * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
@@ -420,10 +427,9 @@ async function growOffices(ns, log, state, request) {
   let cost = 0;
   for (const office of offices) {
     const size = request.size ? Math.max(office.size, request.size) : largestAffordableSize(office.size, budgetPerOffice);
-    const currentWeights = Object.fromEntries(JOBS.map((job) => [job, office.employeeJobs[job] ?? 0]));
-    const weights = request.jobs ?? (JOBS.some((job) => currentWeights[job] > 0)
-      ? currentWeights : { Operations: 1, Engineer: 1, Business: 1, Management: 1 });
-    const split = jobSplit(size, weights);
+    // Jobs from a tool's --jobs, else lib/corp-staffing.js (R&D share, development city, revenue goal of this office).
+    const planned = request.jobs ? null : officeJobs(state, request.division, office, size, developmentCityOf(state, request.division), researchShare);
+    const split = jobSplit(size, request.jobs ?? planned?.jobs ?? {});
     const upgradeCost = size > office.size ? officeUpgradeCost(office.size, size - office.size) : 0;
     cost += upgradeCost;
     if (size > office.size) upgrades.push([request.division, office.city, size - office.size]);
@@ -432,7 +438,7 @@ async function growOffices(ns, log, state, request) {
     // 1/9 interns energy and morale decay, so if hiring fell short, a regular job comes up short instead.
     for (const job of ["Intern", ...JOBS]) assignments.push([request.division, office.city, job, 0]);
     for (const job of ["Intern", ...JOBS]) if (split[job]) assignments.push([request.division, office.city, job, split[job]]);
-    lines.push(`${office.city}: ${office.size} -> ${size} ($${(upgradeCost / 1e9).toFixed(1)}b), ${JSON.stringify(split)}`);
+    lines.push(`${office.city}: ${office.size} -> ${size} ($${(upgradeCost / 1e9).toFixed(1)}b), ${planned ? planned.goal + " " : ""}${JSON.stringify(split)}`);
   }
   if (request.dryRun) {
     log("plan", `${request.division} offices for $${(cost / 1e9).toFixed(1)}b:`);
@@ -473,11 +479,11 @@ function addDivisionSteps(ns, log, state, request, mainCityOf, preferredCity) {
   const time = Date.now(), name = division.name, budgetFraction = request.budgetFraction;
   const steps = [
     { type: "expand", division: name, time },
-    // Product divisions develop in the main city: Engineers and Management drive rating, speed and markup.
+    // Product divisions develop in the main city (fastest-development split, lib/corp-staffing.js).
     ...(division.makesProducts ? [{ type: "office", division: name, city: preferredCity, size: 0, budgetFraction,
-      jobs: { Operations: 4, Engineer: 22, Business: 8, Management: 24 }, time }] : []),
+      jobs: null, time }] : []),
     { type: "office", division: name, city: "all", size: 0, budgetFraction, jobs: null, time },
-    { type: "boosts", division: name, budgetFraction, fill: 0.5, time },
+    { type: "boosts", division: name, budgetFraction, fill: BOOST_FILL, time },
     { type: "exports", time },
     ...(division.makesProducts ? [{ type: "adverts", division: name, budgetFraction, time }] : []),
   ];
@@ -507,7 +513,7 @@ async function limitProduction(ns, log, state, request) {
 async function expandDivision(ns, log, state, request) {
   const division = state.divisions.find((/** @type {{name: string}} */ entry) => entry.name === request.division);
   if (!division) { log("failed", `expand: no division ${request.division}`); return; }
-  const data = await io.runReader(ns, "industry-data", [JSON.stringify([division.industry])]);
+  const data = await runReader(ns, "industry-data", [JSON.stringify([division.industry])]);
   const produced = /** @type {string[]} */ (data.industries[division.industry].producedMaterials);
   const newCities = ALL_CITIES.filter((city) => !division.cities.includes(city));
   const withWarehouse = new Set(state.warehouses.filter((/** @type {{division: string}} */ warehouse) => warehouse.division === division.name)
@@ -535,7 +541,7 @@ async function expandDivision(ns, log, state, request) {
 async function setUpExports(ns, log, state, request) {
   /** @type {{name: string, industry: string}[]} */
   const divisions = state.divisions;
-  const data = await io.runReader(ns, "industry-data", [JSON.stringify([...new Set(divisions.map((division) => division.industry))])]);
+  const data = await runReader(ns, "industry-data", [JSON.stringify([...new Set(divisions.map((division) => division.industry))])]);
   const warehouseCities = (/** @type {string} */ name) => new Set(state.warehouses
     .filter((/** @type {{division: string}} */ warehouse) => warehouse.division === name).map((/** @type {{city: string}} */ warehouse) => warehouse.city));
   const exports = [], supplyOptions = [], routes = [];
@@ -571,7 +577,7 @@ async function setUpExports(ns, log, state, request) {
 async function buyBoosts(ns, log, state, request) {
   const division = state.divisions.find((/** @type {{name: string}} */ entry) => entry.name === request.division);
   if (!division) { log("failed", `boosts: no division ${request.division}`); return; }
-  const data = await io.runReader(ns, "industry-data", [JSON.stringify([division.industry])]);
+  const data = await runReader(ns, "industry-data", [JSON.stringify([division.industry])]);
   const cities = state.warehouses.filter((/** @type {{division: string}} */ warehouse) => warehouse.division === division.name)
     .map((/** @type {{city: string, level: number, size: number, sizeUsed: number}} */ warehouse) => {
       const materials = state.materials.filter((/** @type {MaterialData} */ material) => material.division === division.name && material.city === warehouse.city
@@ -612,7 +618,7 @@ function nextProductName(division, products) {
  * @param {boolean} [logEachCall]
  */
 async function report(ns, log, action, calls, logEachCall = true) {
-  const results = await io.runAction(ns, action, calls);
+  const results = await runActionByPort(ns, action, calls);
   const failures = results.filter((result) => !result.ok);
   if (logEachCall || failures.length) {
     const first = JSON.stringify(results[0]?.args ?? []);
