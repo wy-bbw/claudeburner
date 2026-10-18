@@ -11,7 +11,7 @@ export async function main(ns) {
     return [industry, {
       factors: { "Real Estate": data.realEstateFactor ?? 0, Hardware: data.hardwareFactor ?? 0, Robots: data.robotFactor ?? 0, "AI Cores": data.aiCoreFactor ?? 0 },
       requiredMaterials: data.requiredMaterials, producedMaterials: data.producedMaterials ?? [], makesProducts: data.makesProducts,
-      scienceFactor: data.scienceFactor ?? 0,
+      scienceFactor: data.scienceFactor ?? 0, advertisingFactor: data.advertisingFactor ?? 0,
     }];
   }));
   const materials = BOOST_MATERIALS.map((material) => ns.corporation.getMaterialData(material));

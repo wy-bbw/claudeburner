@@ -13,6 +13,7 @@ export async function main(ns) {
       effectiveRating: product.effectiveRating, desiredSellAmount: product.desiredSellAmount,
       desiredSellPrice: product.desiredSellPrice, stored: product.stored, productionAmount: product.productionAmount,
       actualSellAmount: product.actualSellAmount, productionCost: product.productionCost,
+      demand: product.demand, competition: product.competition,
       designInvestment: product.designInvestment, advertisingInvestment: product.advertisingInvestment,
     };
   })));

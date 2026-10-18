@@ -7,6 +7,7 @@ import { formatPrice, nextPriceDelta, parsePriceDelta } from "lib/corp-pricing.j
 import { readStateDirect, runReader } from "lib/corp-direct.js";
 import { runActionByPort } from "lib/corp-scripts.js";
 import { inputLimitedConsumers, officeJobs, suppliersFor } from "lib/corp-staffing.js";
+import { marketTa2Delta } from "lib/corp-market.js";
 
 const LOG_FILE = "data/corp-manager.txt";
 const PRICES_FILE = "data/corp-prices.txt";
@@ -123,8 +124,7 @@ export async function runCorporationManager(ns) {
       const growing = productDivisionsOf(state, flags);
       // Suppliers grow too (5% offices + 5% boosts of the funds, split over them): those that cannot feed their importers
       // (the rest is bought at quality 1) and those whose consumers' output quality is capped by their input quality.
-      const industries = [...new Set(state.divisions.map((/** @type {any} */ entry) => entry.industry))];
-      const limited = inputLimitedConsumers(state, await runReader(ns, "industry-data", [JSON.stringify(industries)]));
+      const limited = inputLimitedConsumers(state, await readIndustryData(ns, state));
       const quality = suppliersFor(state, limited);
       for (const consumer of limited) log("quality", `${consumer.division} ${consumer.city}: ${consumer.reason} -> grow the suppliers of ${consumer.inputs.join(", ")}`);
       if (quality.unsupplied.length) log("quality", `no supplier division for ${quality.unsupplied.join("; ")} (bought at quality 1)`);
@@ -185,7 +185,7 @@ export async function runCorporationManager(ns) {
       /** @type {MaterialData[]} */
       const materialEntries = flags["fixed-material-prices"] ? [] : (state.materials ?? []).filter((/** @type {MaterialData} */ material) =>
         material.productionAmount > 0);
-      const pricing = priceOrders(productEntries, materialEntries, priceMemory);
+      const pricing = priceOrders(productEntries, materialEntries, priceMemory, { state, industryData: await readIndustryData(ns, state) });
       writePrices(ns, pricing.lines);
       if (pricing.productOrders.length) await report(ns, log, "sell-product", pricing.productOrders, false);
       if (pricing.materialOrders.length) await report(ns, log, "sell-material", pricing.materialOrders, false);
@@ -344,11 +344,27 @@ async function manageProducts(ns, log, state, divisionData, mainCity, funds, fla
   return { acted, funds };
 }
 
+/** @type {any} industry data of the divisions seen so far (static game data; read again when a new industry appears) */
+let industryDataCache = null;
+
+/** @param {NS} ns @param {any} state */
+async function readIndustryData(ns, state) {
+  const industries = [...new Set(state.divisions.map((/** @type {any} */ entry) => String(entry.industry)))];
+  if (!industryDataCache || industries.some((industry) => !industryDataCache.industries[industry]))
+    industryDataCache = await runReader(ns, "industry-data", [JSON.stringify(industries)]);
+  return industryDataCache;
+}
+
 /**
- * New sell orders for every product and material whose price is "MP" or "MP+x" (lib/corp-pricing.js).
- * @param {ProductData[]} products @param {MaterialData[]} materials @param {Map<string, {calibrated?: boolean}>} memory
+ * New sell orders for every product and material whose price is "MP" or "MP+x": the Market-TA.II formula
+ * (lib/corp-market.js) when demand and competition are visible (the two market research unlocks) and, for a product, its
+ * markup is known; otherwise probing and measuring (lib/corp-pricing.js).
+ * @param {ProductData[]} products @param {MaterialData[]} materials @param {Map<string, any>} memory
+ * @param {{state: any, industryData: any}} market
  */
-function priceOrders(products, materials, memory) {
+function priceOrders(products, materials, memory, market) {
+  const { state, industryData } = market;
+  const salesBotsLevel = state.upgrades?.["ABC SalesBots"] ?? 0;
   /** @type {unknown[][]} */
   const productOrders = [], materialOrders = [];
   /** @type {string[]} */
@@ -366,7 +382,22 @@ function priceOrders(products, materials, memory) {
     if (delta === null) continue;
     const key = `${entry.division}/${entry.city}/${entry.name}`;
     if (!memory.has(key)) memory.set(key, {});
-    const next = nextPriceDelta({ marketPrice, delta, sold: entry.actualSellAmount, supply, leftover: entry.stored, startDelta, kind },
+    const division = state.divisions.find((/** @type {any} */ candidate) => candidate.name === entry.division);
+    const office = (state.offices ?? []).find((/** @type {any} */ candidate) => candidate.division === entry.division && candidate.city === entry.city);
+    const productKey = `${entry.division}/${entry.name}/markup`;
+    if (!memory.has(productKey)) memory.set(productKey, {});
+    const formula = division ? marketTa2Delta({
+      kind, marketPrice, delta, sold: entry.actualSellAmount, leftover: entry.stored,
+      // What comes in for sale per second: production, except where exports take part of it (then what sold).
+      supply: kind === "product" || !(/** @type {any} */ (entry).exports?.length) ? entry.productionAmount : entry.actualSellAmount,
+      quality: kind === "product" ? /** @type {any} */ (entry).effectiveRating : /** @type {any} */ (entry).quality,
+      demand: /** @type {any} */ (entry).demand, competition: /** @type {any} */ (entry).competition,
+      businessProduction: office?.employeeProductionByJob?.Business ?? 0, salesBotsLevel,
+      awareness: division.awareness ?? 0, popularity: division.popularity ?? 0,
+      advertisingFactor: industryData?.industries?.[division.industry]?.advertisingFactor ?? 0,
+      baseMarkup: industryData?.baseMarkups?.[entry.name],
+    }, memory.get(productKey)) : null;
+    const next = formula ?? nextPriceDelta({ marketPrice, delta, sold: entry.actualSellAmount, supply, leftover: entry.stored, startDelta, kind },
       /** @type {{calibrated?: boolean}} */ (memory.get(key)));
     const price = formatPrice(next.delta);
     lines.push(`${key.padEnd(34)} ${price.padEnd(14)} = ${((marketPrice + next.delta) / marketPrice).toFixed(3)} x MP`

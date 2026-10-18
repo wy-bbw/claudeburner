@@ -13,7 +13,7 @@ export async function main(ns) {
       if (material.stored || material.buyAmount || material.productionAmount || material.actualSellAmount || material.exports.length || material.importAmount) {
         materials.push({ division, city, name, stored: material.stored, quality: material.quality, buyAmount: material.buyAmount,
           productionAmount: material.productionAmount, actualSellAmount: material.actualSellAmount, marketPrice: material.marketPrice,
-          importAmount: material.importAmount, exports: material.exports,
+          importAmount: material.importAmount, exports: material.exports, demand: material.demand, competition: material.competition,
           desiredSellAmount: material.desiredSellAmount, desiredSellPrice: material.desiredSellPrice });
       }
     }

@@ -56,7 +56,7 @@ export async function runReader(ns, name, args) {
           if (material.stored || material.buyAmount || material.productionAmount || material.actualSellAmount || material.exports.length || material.importAmount) {
             materials.push({ division, city, name: materialName, stored: material.stored, quality: material.quality, buyAmount: material.buyAmount,
               productionAmount: material.productionAmount, actualSellAmount: material.actualSellAmount, marketPrice: material.marketPrice,
-              importAmount: material.importAmount, exports: material.exports,
+              importAmount: material.importAmount, exports: material.exports, demand: material.demand, competition: material.competition,
               desiredSellAmount: material.desiredSellAmount, desiredSellPrice: material.desiredSellPrice });
           }
         }
@@ -73,6 +73,7 @@ export async function runReader(ns, name, args) {
           effectiveRating: product.effectiveRating, desiredSellAmount: product.desiredSellAmount,
           desiredSellPrice: product.desiredSellPrice, stored: product.stored, productionAmount: product.productionAmount,
           actualSellAmount: product.actualSellAmount, productionCost: product.productionCost,
+          demand: product.demand, competition: product.competition,
           designInvestment: product.designInvestment, advertisingInvestment: product.advertisingInvestment,
         };
       })));
@@ -92,13 +93,15 @@ export async function runReader(ns, name, args) {
         return [industry, {
           factors: { "Real Estate": data.realEstateFactor ?? 0, Hardware: data.hardwareFactor ?? 0, Robots: data.robotFactor ?? 0, "AI Cores": data.aiCoreFactor ?? 0 },
           requiredMaterials: data.requiredMaterials, producedMaterials: data.producedMaterials ?? [], makesProducts: data.makesProducts,
-          scienceFactor: data.scienceFactor ?? 0,
+          scienceFactor: data.scienceFactor ?? 0, advertisingFactor: data.advertisingFactor ?? 0,
         }];
       }));
       const materials = BOOST_MATERIALS.map((material) => corporation.getMaterialData(material));
       const sizes = Object.fromEntries(materials.map((material) => [material.name, material.size]));
       const baseCosts = Object.fromEntries(materials.map((material) => [material.name, material.baseCost]));
-      return { industries: byIndustry, sizes, baseCosts };
+      // Base markup of every material (markup limit = quality / base markup), for lib/corp-market.js.
+      const baseMarkups = Object.fromEntries(corporation.getConstants().materialNames.map((material) => [material, corporation.getMaterialData(material).baseMarkup]));
+      return { industries: byIndustry, sizes, baseCosts, baseMarkups };
     }
     default:
       throw new Error(`unknown corporation reader ${name}`);

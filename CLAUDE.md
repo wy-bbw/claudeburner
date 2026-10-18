@@ -113,7 +113,7 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   agent.js only, no hacking or hacking-economy home services (corp calls cost 10-20 GB each; corp-manager.js needs ~115 GB + 21.6 GB). start.js
   would start those again. Corp scripts: one corporation function per worker script (`workers/corp-read-*.js` 11.6 GB,
   `workers/corp-do-<action>.js` 21.6 GB, taking a JSON list of calls), run one at a time via `lib/corp-scripts.js`
-  (waits for free RAM). corp-manager.js: products (develop, discontinue the worst, sell), custom Market-TA.II pricing
+  (waits for free RAM). corp-manager.js: products (develop, discontinue the worst, sell), custom Market-TA.II pricing (since 2026-10-18 the game's TA2 formula in `lib/corp-market.js` when the Demand + Competition unlocks are bought: price = MP + markupLimit x sqrt(potential / units to sell), potential = quality factor x demand x (100-competition)/100 x business x SalesBots x advertising; product markup measured once per product from an overshoot; otherwise the probing below)
   for products and materials (`lib/corp-pricing.js`: C = sold x (price-MP)^2 from a cycle with stock left, price =
   MP + sqrt(C/supply); log data/corp-manager.txt, prices data/corp-prices.txt), Wilson + Advert (`--hold-upgrades`
   before accepting an offer). `tools/corp-exports.js` sets the Agriculture/Chemical/Tobacco exports + Smart Supply
@@ -162,7 +162,7 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 - Imports are root-absolute (`lib/net.js`), matching the game's file layout.
 - Home RAM resets to 8 GB on a new BitNode: everything must still start on 8 GB (start.js 7.35 GB, agent 3.7 GB). The controller runs on a rooted server and uses home only above `--home-reserve` (16 GB).
 - Call port openers explicitly; dynamic `ns[fn]` breaks the RAM calculator.
-- The RAM calculator bills any identifier that matches an ns function, also local functions and properties: `flags.share` cost 2.4 GB (ns.share), a helper named `run` cost 1 GB (ns.run). Avoid such names; check `cli ram` after edits.
+- The RAM calculator bills any identifier that matches an ns function, also local functions and properties: `flags.share` cost 2.4 GB (ns.share), a helper named `run` cost 1 GB (ns.run), a local `research` 20 GB (ns.corporation.research). Avoid such names; check `cli ram` after edits. The game caches a script's RAM until that file itself changes: after editing only an imported lib, `cli ram` on the service shows the old value.
 - `data/state.txt` on home is the controller's JSON snapshot; `tools/state.js` writes a heavier full dump to `data/full-state.txt` (4.7 GB).
 
 ## Layout (`src/`, synced to home)
