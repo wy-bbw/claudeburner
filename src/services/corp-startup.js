@@ -5,17 +5,19 @@ import { upgradeCost } from "lib/corp-upgrades.js";
 import { JOBS, officeUpgradeCost } from "lib/corp-offices.js";
 
 // corp-startup.js (home): the startup recipe of the memory note "corp-startup-recipe" as steps, one phase per run:
-//   --phase startup        expand to six cities, Smart Supply, Advert 3, warehouses 4, research 78 points, Smart Storage 3 /
-//                          Smart Factories 3, 3 employees (Operations 1 / Engineer 1 / Management 1), fill the warehouses
+//   --phase startup        expand to six cities, Smart Supply, Advert 3, warehouses 4, offices to 4 employees all on R&D until
+//                          75 research points, Smart Storage 3 / Smart Factories 3, then jobs Operations 1 / Engineer 1 /
+//                          Business 1 / Management 1, fill the warehouses
 //   --phase after-round-1  after accepting round 1: Wilson 4 + the upgrade targets, warehouses to 2k storage (level 10 with
 //                          Smart Storage 10), 6 employees (1/1/2/1/1/0), Advert 16, fill again
 // Dry run by default: prints each step with its cash cost (--go does it). Create the corporation and the Agriculture
 // division by hand first (no worker for that). The fill is bought last and on debt (bulk purchase; funds may go negative),
 // all other steps need cash and stop the run when it is missing. Not the corp manager: start nothing else meanwhile.
-// --only <step> runs one step (expand, smart-supply, adverts, warehouses, research, upgrades, staff, fill).
+// --only <step> runs one step (expand, smart-supply, adverts, warehouses, research, upgrades, staff, fill); "research" only
+// waits for the points, the staff step before it puts everyone on R&D.
 // Needs the corporation workers (workers/corp-read-*.js, workers/corp-do-*.js) and ~25 GB free on home, one at a time.
 // Log: data/corp-startup.txt.
-// Usage: run services/corp-startup.js --phase startup [--division <name>] [--fill 0.83] [--research-points 78] [--go]
+// Usage: run services/corp-startup.js --phase startup [--division <name>] [--fill 0.83] [--research-points 75] [--go]
 
 const LOG_FILE = "data/corp-startup.txt";
 const ALL_CITIES = /** @type {CityName[]} */ (["Sector-12", "Aevum", "Chongqing", "New Tokyo", "Ishima", "Volhaven"]);
@@ -32,9 +34,10 @@ const PHASES = {
     { step: "smart-supply" },
     { step: "adverts", total: 3 },
     { step: "warehouses", level: 4 },
+    { step: "staff", size: 4, jobs: { [RESEARCH_JOB]: 4 } },
     { step: "research" },
     { step: "upgrades", levels: { [SMART_STORAGE]: 3, "Smart Factories": 3 } },
-    { step: "staff", size: 3, jobs: { Operations: 1, Engineer: 1, Management: 1 } },
+    { step: "staff", size: 4, jobs: { Operations: 1, Engineer: 1, Business: 1, Management: 1 } },
     { step: "fill" },
   ],
   "after-round-1": [
@@ -55,7 +58,7 @@ const billions = (/** @type {number} */ value) => `$${(value / 1e9).toFixed(1)}b
 /** @param {NS} ns */
 export async function main(ns) {
   ns.disableLog("ALL");
-  const flags = ns.flags([["phase", "startup"], ["division", ""], ["fill", 0.83], ["research-points", 78], ["go", false], ["only", ""]]);
+  const flags = ns.flags([["phase", "startup"], ["division", ""], ["fill", 0.83], ["research-points", 75], ["go", false], ["only", ""]]);
   const phase = PHASES[String(flags.phase)];
   if (!phase) { ns.tprint(`--phase must be ${Object.keys(PHASES).join(" or ")}`); return; }
   const go = Boolean(flags.go);
@@ -71,7 +74,8 @@ export async function main(ns) {
   say(`${go ? "RUN" : "DRY RUN"} phase ${flags.phase} for ${divisionName}; funds ${billions(corporation.funds)}`);
 
   // What the dry run assumes the earlier steps did (a real run reads the game again before each step).
-  const planned = { funds: corporation.funds, smartStorage: -1, levels: /** @type {Map<string, number>} */ (new Map()) };
+  const planned = { funds: corporation.funds, smartStorage: -1, levels: /** @type {Map<string, number>} */ (new Map()),
+    officeSizes: /** @type {Map<string, number>} */ (new Map()) };
 
   for (const entry of phase) {
     if (flags.only && flags.only !== entry.step) continue;
@@ -108,7 +112,7 @@ async function readSnapshot(ns, division) {
 /**
  * Plans one step against the snapshot: what it does, what it costs in cash and how to do it.
  * @param {NS} ns @param {{step: string, [key: string]: any}} entry @param {Awaited<ReturnType<typeof readSnapshot>>} snapshot
- * @param {{funds: number, smartStorage: number, levels: Map<string, number>}} planned @param {any} flags @param {(text: string) => void} say
+ * @param {{funds: number, smartStorage: number, levels: Map<string, number>, officeSizes: Map<string, number>}} planned @param {any} flags @param {(text: string) => void} say
  */
 async function planStep(ns, entry, snapshot, planned, flags, say) {
   const { info, offices, warehouses, upgrades } = snapshot;
@@ -187,8 +191,11 @@ async function planStep(ns, entry, snapshot, planned, flags, say) {
       /** @type {unknown[][]} */
       const assignments = [];
       for (const office of offices) {
-        const increase = Math.max(0, entry.size - office.size);
-        if (increase) { upgradesCalls.push([division, office.city, increase]); cost += officeUpgradeCost(office.size, increase); }
+        // Dry run: an earlier staff step may already have grown the office.
+        const size = go ? office.size : Math.max(office.size, planned.officeSizes.get(office.city) ?? 0);
+        const increase = Math.max(0, entry.size - size);
+        if (increase) { upgradesCalls.push([division, office.city, increase]); cost += officeUpgradeCost(size, increase); }
+        planned.officeSizes.set(office.city, Math.max(size, entry.size));
         for (let hire = office.numEmployees; hire < entry.size; hire++) hires.push([division, office.city, "Unassigned"]);
         for (const job of ["Intern", ...JOBS]) assignments.push([division, office.city, job, 0]);
         for (const job of JOBS) if (jobs[job]) assignments.push([division, office.city, job, jobs[job]]);
@@ -203,17 +210,8 @@ async function planStep(ns, entry, snapshot, planned, flags, say) {
     }
     case "research": {
       const target = Number(flags["research-points"]);
-      lines.push(`all employees on ${RESEARCH_JOB} until ${target} research points (now ${info.researchPoints.toFixed(1)}), then the staff step sets the jobs`);
+      lines.push(`wait until ${target} research points (now ${info.researchPoints.toFixed(1)}; the staff step before puts everyone on R&D)`);
       run = async () => {
-        /** @type {unknown[][]} */
-        const hires = [], assignments = [];
-        for (const office of offices) {
-          for (let hire = office.numEmployees; hire < office.size; hire++) hires.push([division, office.city, "Unassigned"]);
-          for (const job of ["Intern", ...JOBS]) assignments.push([division, office.city, job, 0]);
-          assignments.push([division, office.city, RESEARCH_JOB, office.size]);
-        }
-        if (hires.length) await act(ns, say, "hire-employee", hires);
-        await act(ns, say, "set-job-assignment", assignments);
         while (true) {
           const [current] = await runReader(ns, "divisions", [JSON.stringify([division])]);
           say(`research ${current.researchPoints.toFixed(1)} / ${target}`);
