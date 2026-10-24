@@ -1,4 +1,4 @@
-// Shared body of the corporation action workers (workers/corp-do-*.js). Kept apart from lib/corp-scripts.js so the
+// Shared body of the corporation action workers (workers/corp/do-*.js). Kept apart from lib/corp-scripts.js so the
 // workers do not pay RAM for the runner's ns.run / ns.isRunning.
 
 /**

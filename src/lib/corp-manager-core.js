@@ -37,15 +37,15 @@ const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
 /**
  * @typedef {{division: string, city: CityName, name: string, developmentProgress: number, rating: number,
  *   desiredSellAmount: string | number, desiredSellPrice: string | number, stored: number, productionAmount: number,
- *   actualSellAmount: number, productionCost: number}} ProductData one product in one city (workers/corp-read-products.js)
+ *   actualSellAmount: number, productionCost: number}} ProductData one product in one city (workers/corp/read-products.js)
  * @typedef {{division: string, city: CityName, name: string, stored: number, productionAmount: number,
  *   actualSellAmount: number, marketPrice: number, desiredSellAmount?: string | number,
- *   desiredSellPrice?: string | number}} MaterialData (workers/corp-read-materials.js)
+ *   desiredSellPrice?: string | number}} MaterialData (workers/corp/read-materials.js)
  * @typedef {{division: string, city: CityName, numEmployees: number, avgEnergy: number, maxEnergy: number,
- *   avgMorale: number, maxMorale: number}} OfficeData (workers/corp-read-offices.js)
+ *   avgMorale: number, maxMorale: number}} OfficeData (workers/corp/read-offices.js)
  */
 
-// corp-manager.js (home): runs the corporation's routine work, the round 3+ loop of the corporation guide:
+// services/corp/manager.js (home): runs the corporation's routine work, the round 3+ loop of the corporation guide:
 // - Products of every product division (--division all, or a comma list): always one in development in --city
 //   (or the division's first city without an office there); when all product slots are full, the product with
 //   the lowest rating is discontinued first. Design and marketing investment: --invest-fraction of funds each
@@ -61,15 +61,15 @@ const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
 //   while each costs <= --advert-fraction of funds. Wilson first and generously: every later Advert multiplies awareness and
 //   popularity by 1.005 x the Wilson multiplier (game code applyAdVert), so its effect compounds over all later Adverts.
 // Decisions use the corporation state read from the API in this process each round (lib/corp-direct.js: no state file);
-// after acting it waits for a newer state. Every action is its own 20 GB worker (workers/corp-do-*.js, answers by port).
+// after acting it waits for a newer state. Every action is its own 20 GB worker (workers/corp/do-*.js, answers by port).
 // Price calibrations live in RAM and are re-learned after a restart. Log: data/corp-manager.txt; current prices:
 // data/corp-prices.txt (rewritten every pricing round).
 // - Requests queued by tools in data/corp-requests.txt (JSON lines), one per round so each sees a fresh state:
-//   tools/corp-boosts.js (warehouse levels + optimal boost materials), tools/corp-upgrades.js (corporation upgrades),
-//   tools/corp-office.js (office size, hiring, job split), tools/corp-adverts.js (Advert levels for a division),
-//   tools/corp-expand.js (a division in every city), tools/corp-exports.js (supply chain exports between divisions),
-//   tools/corp-limit-production.js (cap a material's production, e.g. Robots in Robotics),
-//   tools/corp-add-division.js (all set-up steps for a new division in one go).
+//   tools/corp/boosts.js (warehouse levels + optimal boost materials), tools/corp/upgrades.js (corporation upgrades),
+//   tools/corp/office.js (office size, hiring, job split), tools/corp/adverts.js (Advert levels for a division),
+//   tools/corp/expand.js (a division in every city), tools/corp/exports.js (supply chain exports between divisions),
+//   tools/corp/limit-production.js (cap a material's production, e.g. Robots in Robotics),
+//   tools/corp/add-division.js (all set-up steps for a new division in one go).
 // --reinvest-minutes N (default 5, 0 = off) queues upgrades (20% of funds), main office (15%), all offices (10%) and boosts
 // (10%) of every product division every N minutes, plus 5% offices + 5% boosts for suppliers that cannot feed their importers
 // (each request spends its share of the funds when it runs).
@@ -78,7 +78,7 @@ const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
 // --mode maintain|grow (default maintain, for a mature company): R&D share of every office, 50% (research first) or 20%
 // (profit first), reassigned in every reinvest round. Growing a young company toward investors needs its own strategy.
 // --hold-upgrades stops Wilson/Advert purchases (e.g. while waiting for an investment offer: spending lowers it).
-// Usage: run services/corp-manager.js [--division all|tobacco,sicko] [--city Aevum]
+// Usage: run services/corp/manager.js [--division all|tobacco,sicko] [--city Aevum]
 /** @param {NS} ns */
 export async function runCorporationManager(ns) {
   ns.disableLog("ALL");
@@ -451,7 +451,7 @@ function writePrices(ns, lines) {
 }
 
 /**
- * tools/corp-adverts.js request: as many Advert levels for one division as a share of funds buys.
+ * tools/corp/adverts.js request: as many Advert levels for one division as a share of funds buys.
  * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
  * @param {{division: string, budgetFraction: number, dryRun?: boolean}} request
  */
@@ -469,7 +469,7 @@ async function buyAdverts(ns, log, state, request) {
 }
 
 /**
- * tools/corp-office.js request: grow offices to a size (or what a budget buys), hire up to it and split the jobs.
+ * tools/corp/office.js request: grow offices to a size (or what a budget buys), hire up to it and split the jobs.
  * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
  * @param {{division: string, city: string, size: number, budgetFraction: number, jobs: Record<string, number> | null,
  *   dryRun?: boolean}} request
@@ -509,7 +509,7 @@ async function growOffices(ns, log, state, request) {
 }
 
 /**
- * tools/corp-upgrades.js request: corporation upgrades for a share of funds, cheapest next level first.
+ * tools/corp/upgrades.js request: corporation upgrades for a share of funds, cheapest next level first.
  * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
  * @param {{names: string[], budgetFraction: number, dryRun?: boolean}} request
  */
@@ -524,7 +524,7 @@ async function buyUpgrades(ns, log, state, request) {
 }
 
 /**
- * tools/corp-add-division.js request: puts the set-up steps for one division at the front of the queue (they then
+ * tools/corp/add-division.js request: puts the set-up steps for one division at the front of the queue (they then
  * run one per round like any request, each seeing what the previous one changed).
  * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
  * @param {{division: string, budgetFraction: number}} request
@@ -550,7 +550,7 @@ function addDivisionSteps(ns, log, state, request, mainCityOf, preferredCity) {
 }
 
 /**
- * tools/corp-limit-production.js request: cap a material's production in every city of a division.
+ * tools/corp/limit-production.js request: cap a material's production in every city of a division.
  * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
  * @param {{division: string, material: string, amount: number}} request
  */
@@ -562,7 +562,7 @@ async function limitProduction(ns, log, state, request) {
 }
 
 /**
- * tools/corp-expand.js request: a division in every city - offices ($4b), warehouses ($5b), Smart Supply on, and a
+ * tools/corp/expand.js request: a division in every city - offices ($4b), warehouses ($5b), Smart Supply on, and a
  * "MAX" / "MP" sell order for every material the industry produces (the pricing takes over from there).
  * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
  * @param {{division: string, dryRun?: boolean}} request
@@ -588,7 +588,7 @@ async function expandDivision(ns, log, state, request) {
 }
 
 /**
- * tools/corp-exports.js request: every division gets every input material that another division of the corporation
+ * tools/corp/exports.js request: every division gets every input material that another division of the corporation
  * produces, in every city where both have a warehouse, with the guide's amount (IPROD+IINV/10)*(-1); Smart Supply of
  * imported materials set to "leftovers" (it then buys only what the stock, imports included, does not cover).
  * Existing exports are kept.
@@ -627,7 +627,7 @@ async function setUpExports(ns, log, state, request) {
 }
 
 /**
- * tools/corp-boosts.js request: warehouse levels + optimal boost materials for one division (lib/corp-boosts.js).
+ * tools/corp/boosts.js request: warehouse levels + optimal boost materials for one division (lib/corp-boosts.js).
  * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
  * @param {{division: string, budgetFraction: number, fill: number, dryRun?: boolean}} request
  */

@@ -1,4 +1,4 @@
-// Batch shapes and RAM allocation for services/batcher.js. Needs Formulas.exe (ns.formulas.hacking).
+// Batch shapes and RAM allocation for services/hacking/batcher.js. Needs Formulas.exe (ns.formulas.hacking).
 //
 // A batch is four operations landing `spacingMs` apart on a target at min security and max money:
 //   hack (steals hackFraction) -> weaken1 (undoes the hack's security) -> grow (back to max) -> weaken2.

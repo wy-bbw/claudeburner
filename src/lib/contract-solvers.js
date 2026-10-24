@@ -1,6 +1,6 @@
 // Solvers for coding contracts, keyed by contract type (ns.enums.CodingContractName values).
 // Each takes the contract's data and returns the answer in the shape the game expects.
-// Verify with tools/test-contract-solvers.js (dummy contracts, no reward) before trusting one.
+// Verify with tools/coding-contracts/test-solvers.js (dummy contracts, no reward) before trusting one.
 
 /** @type {Record<string, (data: any) => any>} */
 export const CONTRACT_SOLVERS = {

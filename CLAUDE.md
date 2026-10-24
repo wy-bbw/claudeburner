@@ -4,7 +4,7 @@ Experiment: playing Bitburner (Steam) with Claude writing all the scripts. Fresh
 
 ## Goal
 Fastest progress by **real time**. Start on easy targets, move to harder ones when they pay more net of prep time;
-prep the next target in parallel. Verify every model/claim with the metrics sampler (`services/metrics.js` + `bridge/report.mjs`,
+prep the next target in parallel. Verify every model/claim with the metrics sampler (`services/hacking/metrics.js` + `bridge/report.mjs`,
 baseline vs change, marks in `marks.txt`) — formulas from memory have been wrong before.
 Lesson: every server starts at 4% of max money; low-growth targets need hours of prep (sigma-cosmetics ~5 h), n00dles ~1 min.
 
@@ -18,7 +18,7 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   Singularity API (RAM x16 at SF4.1, x4 at 4.2, x1 at 4.3): automate factions, augmentation buying, installs, work.
   Start: `run start.js` (hacking) until $150b personal money -> create the corporation self-funded (seed money is BN3
   only) -> round 1 by hand -> buy Office API + Warehouse API ($50b each in corp funds; free only with SF3.3; every corp
-  script needs them) -> `run start-corporation.js` -> the BN3 recipe with the tools (corp-add-division, ...).
+  script needs them) -> `run start-corporation.js` -> the BN3 recipe with the tools (`tools/corp/add-division.js`, ...).
   After every augmentation install run start-corporation.js as well as start.js (start.js starts no corp services).
 
 ## History: late BitNode 1 (2026-10-13)
@@ -60,9 +60,9 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   (unsellable); save + reload fixes it (JSON turns NaN into null). Never cap production at exactly 0.
 - The bridge runs as a background task of the session: start it again with `node bridge/server.mjs` (the game reconnects,
   or Options -> Remote API -> Connect after a game restart).
-- Darknet: map + crack tools exist (`tools/darknet-*.js`); Those are fine. Do continue it.
-  `services/darknet-orchestrator.js` (home, started by start.js) runs a sweep every 5 min: `workers/darknet-crawl.js` spreads over every
-  server `lib/darknet-models.js` cracks (hint rules + model guessers), opens caches, then turns into `workers/darknet-phish.js` with all
+- Darknet: map + crack tools exist (`tools/darknet/*.js`); Those are fine. Do continue it.
+  `services/darknet/orchestrator.js` (home, started by start.js) runs a sweep every 5 min: `workers/darknet/crawl.js` spreads over every
+  server `lib/darknet-models.js` cracks (hint rules + model guessers), opens caches, then turns into `workers/darknet/phish.js` with all
   free RAM. Log data/darknet.txt. First run: ~13-20 servers, ~60 phishing threads; phishing pays ~$450/success (mostly charisma XP).
   Unsolved models (log `unknown`): Factori-Os, OpenWebAccessPoint, NIL, Pr0verFl0, DeepGreen. BellaCuore is solved (roman
   numeral in data, e.g. XCIX = 99). Failed logins log the target's heartbleed logs (often feedback on the attempt).
@@ -108,27 +108,27 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 - Live dashboard: http://127.0.0.1:12526/dashboard (served by the bridge; `bridge/dashboard.html` + `bridge/dashboard-data.mjs`
   read data/metrics.txt, state.txt, darknet.txt, coding-contracts.txt; refresh 5 s). Open the URL, not the file.
 - `node bridge/cli.mjs …` — talks to the bridge (control port 12526): `status | sync | ls | get <file> | ram <file>… | run <script> [-h host] [-t N] [args] | call <method> [json]`.
-- After every reset (augmentation install or new BitNode) the user types `run start.js`: it roots, starts the hacking service on the biggest rooted server (`services/batcher.js` with Formulas.exe, else `controller.js`; the controller runs start.js itself once Formulas.exe appears, and start.js kills it), metrics if home has room, then spawns `agent.js` (fits an 8 GB home). `agent.js` must be running on home. It executes `cli run` commands; for remote hosts it scp's all `.js` first.
-- In corporation BitNodes use `run start-corporation.js` instead: services/corp-status.js + services/corp-manager.js +
-  agent.js only, no hacking or hacking-economy home services (corp calls cost 10-20 GB each; corp-manager.js needs ~115 GB + 21.6 GB). start.js
-  would start those again. Corp scripts: one corporation function per worker script (`workers/corp-read-*.js` 11.6 GB,
-  `workers/corp-do-<action>.js` 21.6 GB, taking a JSON list of calls), run one at a time via `lib/corp-scripts.js`
-  (waits for free RAM). corp-manager.js: products (develop, discontinue the worst, sell), custom Market-TA.II pricing (since 2026-10-18 the game's TA2 formula in `lib/corp-market.js` when the Demand + Competition unlocks are bought: price = MP + markupLimit x sqrt(potential / units to sell), potential = quality factor x demand x (100-competition)/100 x business x SalesBots x advertising; product markup measured once per product from an overshoot, probing until then; without the two unlocks the manager sets no prices at all, detected for free from demand/competition being undefined, hasUnlock would cost 10 GB)
+- After every reset (augmentation install or new BitNode) the user types `run start.js`: it roots, starts the hacking service on the biggest rooted server (`services/hacking/batcher.js` with Formulas.exe, else `services/hacking/controller.js`; the controller runs start.js itself once Formulas.exe appears, and start.js kills it), metrics if home has room, then spawns `agent.js` (fits an 8 GB home). `agent.js` must be running on home. It executes `cli run` commands; for remote hosts it scp's all `.js` first.
+- In corporation BitNodes use `run start-corporation.js` instead: services/corp/status.js + services/corp/manager.js +
+  agent.js only, no hacking or hacking-economy home services (corp calls cost 10-20 GB each; services/corp/manager.js needs ~115 GB + 21.6 GB). start.js
+  would start those again. Corp scripts: one corporation function per worker script (`workers/corp/read-*.js` 11.6 GB,
+  `workers/corp/do-<action>.js` 21.6 GB, taking a JSON list of calls), run one at a time via `lib/corp-scripts.js`
+  (waits for free RAM). services/corp/manager.js: products (develop, discontinue the worst, sell), custom Market-TA.II pricing (since 2026-10-18 the game's TA2 formula in `lib/corp-market.js` when the Demand + Competition unlocks are bought: price = MP + markupLimit x sqrt(potential / units to sell), potential = quality factor x demand x (100-competition)/100 x business x SalesBots x advertising; product markup measured once per product from an overshoot, probing until then; without the two unlocks the manager sets no prices at all, detected for free from demand/competition being undefined, hasUnlock would cost 10 GB)
   for products and materials (`lib/corp-pricing.js`: C = sold x (price-MP)^2 from a cycle with stock left, price =
   MP + sqrt(C/supply); log data/corp-manager.txt, prices data/corp-prices.txt), Wilson + Advert (`--hold-upgrades`
-  before accepting an offer). `tools/corp-exports.js` sets the Agriculture/Chemical/Tobacco exports + Smart Supply
+  before accepting an offer). `tools/corp/exports.js` sets the Agriculture/Chemical/Tobacco exports + Smart Supply
   options.
   Request tools (1.6 GB, queue a JSON line in data/corp-requests.txt; corp-manager runs one per round on a state read
-  after the previous request, `--dry-run` logs the plan): `tools/corp-upgrades.js --budget-fraction f` (Smart
-  Factories/Storage, employee upgrades, Project Insight; cheapest level first), `tools/corp-boosts.js --division d
-  --budget-fraction f [--fill 0.6]` (since 2026-10-18: the warehouse level + boost mix with the highest production multiplier within the budget; held stock is kept and counts against the space, a budget too small to fill still buys the best partial mix: `lib/corp-boosts.js` bestBoostPurchase, KKT amount = max(held, factor / (lambda x size + mu x price) - 500)), `tools/corp-office.js
+  after the previous request, `--dry-run` logs the plan): `tools/corp/upgrades.js --budget-fraction f` (Smart
+  Factories/Storage, employee upgrades, Project Insight; cheapest level first), `tools/corp/boosts.js --division d
+  --budget-fraction f [--fill 0.6]` (since 2026-10-18: the warehouse level + boost mix with the highest production multiplier within the budget; held stock is kept and counts against the space, a budget too small to fill still buys the best partial mix: `lib/corp-boosts.js` bestBoostPurchase, KKT amount = max(held, factor / (lambda x size + mu x price) - 500)), `tools/corp/office.js
   --division d --city c|all --size n|--budget-fraction f [--jobs "Operations:4,Engineer:22,..."]` (grow, hire,
   ceil(size/9) interns first, split). The manager also buys tea and throws parties below max energy/morale - 2.
   The game silently ignores office/warehouse upgrades it cannot afford (workers then report ok).
 - Startup (2026-10-18): `services/corp-startup.js` (2.9 GB, dry run unless `--go`; `--phase startup|after-round-1`, `--only <step>`) does the
-  startup recipe (memory note corp-startup-recipe) step by step through the corp workers (new `workers/corp-do-purchase-unlock.js`).
+  startup recipe (memory note corp-startup-recipe) step by step through the corp workers (new `workers/corp/do-purchase-unlock.js`).
   Create the corporation and the Agriculture division by hand first; do not run the corp manager during startup.
-  `services/corp-growth.js` is an older blank stub.
+  `services/corp/growth.js` is an older blank stub.
 - Product formulas (game source v3.0.1, github bitburner-official/bitburner-src src/Corporation/Product.ts, Division.ts; the Steam
   folder is not readable from the sandbox): only the creation city's office develops a product; markup = 100 / (quality^0.65 x
   (Business+Management share)), so Market-TA.II revenue ~ rating^1.325 x quality^0.65 x that share (best ~36% Engineers / 64%
@@ -145,14 +145,14 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   purchase uses the Wilson multiplier at the time of purchase: buy Wilson BEFORE Advert), then a NEW product division
   (Advert levels count per division: a new one starts at the cheap levels; all corporation-wide upgrades apply at once;
   a big main office gives high-rated first products), ad bomb it, Market-TA.II turns the potential sales into price.
-  High science factor helps the rating: Pharmaceutical "sicko" (0.8) out-earned Tobacco 6x. Tools: corp-expand,
-  corp-office, corp-boosts, corp-exports (generic from industry data), corp-adverts; the manager runs products for
+  High science factor helps the rating: Pharmaceutical "sicko" (0.8) out-earned Tobacco 6x. Tools in `tools/corp/`: expand,
+  office, boosts, exports (generic from industry data), adverts; the manager runs products for
   every product division.
-- Manager logic lives in `lib/corp-manager-core.js`, entry `services/corp-manager.js` (since 2026-10-18 the only variant: the
+- Manager logic lives in `lib/corp-manager-core.js`, entry `services/corp/manager.js` (since 2026-10-18 the only variant: the
   old worker/state-file version was removed and the former corp-manager-direct.js took its name). It reads the corporation API
   in its own process via `lib/corp-direct.js` (no state file, ~113 GB); actions still go through the 21.6 GB workers, answering
   by port 6, because all 20 write calls in one script would need ~510 GB. Price calibrations are not kept across restarts.
-  data/corp-state.txt is now only the dashboard feed of services/corp-status.js (and services/corp-upkeep.js). Tools still queue requests in data/corp-requests.txt. A new division needs `tools/corp-add-division.js <name>` (the
+  data/corp-state.txt is now only the dashboard feed of services/corp/status.js (and services/corp-upkeep.js). Tools still queue requests in data/corp-requests.txt. A new division needs `tools/corp/add-division.js <name>` (the
   manager only runs products/prices by itself); its office step spends `--budget-fraction` of funds, and a product main
   office of 58 employees costs ~$200b (size 3 -> 30 ~ $58b), so Wilson/Advert purchases can starve it (`--hold-upgrades`).
 - Node is at `C:\Program Files\nodejs` — prepend to PATH in shells started before the install.
@@ -166,10 +166,32 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 - `data/state.txt` on home is the controller's JSON snapshot; `tools/state.js` writes a heavier full dump to `data/full-state.txt` (4.7 GB).
 
 ## Layout (`src/`, synced to home)
-- `start.js`, `agent.js` — top level because the user types them by hand.
-- `lib/` shared code · `workers/` single-operation jobs (hack, grow, weaken, share), started only by the controller ·
-  `services/` long-running (`controller.js` or, with Formulas.exe, `batcher.js` (HWGW batches; planner in `lib/batch-planner.js`, preview: `tools/batch-plan.js`, log data/batcher.txt; workers `workers/batch-*.js` take an absolute landing time) on a rooted server; on home: `metrics.js`, `coding-contracts.js`, `server-buyer.js` (no longer started by start.js since 2026-10-16: money is needed elsewhere in BN4) = ns.cloud servers, buys only after TOR + BruteSSH..HTTPWorm are owned (cheaper RAM per GB) and when <10% thread slots are free, `darknet-orchestrator.js`, `corp-status.js` = corp state every 20 s -> data/corp-state.txt + data/corp-history.txt for the dashboard, via one reader script per corp call `workers/corp-read-*.js` (11.6 GB each, run one at a time)) · `tools/` one-shots
-  (`root`, `path` for backdoor connect chains, `backdoor-chains` = paste-ready chain for every server still missing a backdoor (faction + company servers first; `--important`),  `kill`, `kill-all` (every script on every reachable server; `--keep-agent`), `state`, `check-grow`, `usage` = RAM and scripts per server + threads per target, `test-contract-solvers`, `debug-hack-plan`).
-- Coding contracts: `lib/contract-solvers.js` (all 30 types; `tools/describe-contract-type.js` fetches the game's description for a type). Verify with `tools/test-contract-solvers.js` (dummy contracts, results in data/contract-solver-test-results.txt) before trusting changes; `services/coding-contracts.js` on home only attempts verified types and blocks a type after one real failure. Log: data/coding-contracts.txt (readable lines via lib/log.js; logs the user reads are text, logs only scripts read stay JSON). First run: 10 solved, ~5k CyberSec rep + $50M.
-- Start the hacking service: `node bridge/cli.mjs run start.js [--rep <share fraction>]` (restart: `tools/kill.js <host> services/batcher.js` first; a new batcher adopts in-flight batches by their landing times).
+- `start.js`, `start-corporation.js`, `agent.js` — top level because the user types them by hand.
+- Structure rule (user, 2026-10-23/24; keep it when adding scripts): themes are `hacking`, `corp`, `darknet`, `coding-contracts`,
+  `backdoor` (add a new theme folder rather than a new prefix). Inside a theme folder the file name drops the theme prefix
+  (`tools/corp/office.js`, not `tools/corp/corp-office.js`); role prefixes like `read-`/`do-`/`batch-` stay.
+  - `services/` long-running. Top level = only services the user starts by hand; services started by start.js /
+    start-corporation.js (or other scripts) go into `services/<theme>/`.
+  - `tools/` one-shots, all run by hand. General tools stay top level; tools of a theme go into `tools/<theme>/`.
+  - `workers/` single-operation jobs started only by other scripts: always in `workers/<theme>/`, never top level.
+  - `lib/` shared code (flat, prefixed `corp-*.js` etc.; not part of the rule so far).
+- `services/` top level: `server-buyer.js` (ns.cloud servers; not started by start.js since 2026-10-16: money is needed elsewhere
+  in BN4; buys only after TOR + BruteSSH..HTTPWorm are owned and when <10% thread slots are free), `stock-trader.js`,
+  `stock-trader-4s.js`, `infiltration-solver.js`, `infiltration-autopilot.js`, `gym-trainer.js`, `crime.js`, `corp-startup.js`,
+  `corp-upkeep.js`. `services/hacking/` = `controller.js` or, with Formulas.exe, `batcher.js` (HWGW batches; planner in
+  `lib/batch-planner.js`, log data/batcher.txt) on a rooted server, `metrics.js` on home; `services/coding-contracts/solver.js`;
+  `services/darknet/orchestrator.js`; `services/corp/` = `status.js` (corp state every 20 s -> data/corp-state.txt +
+  data/corp-history.txt for the dashboard), `manager.js`, `growth.js` (stub).
+- `tools/` top level: `root`, `path` (backdoor connect chain), `kill`, `kill-all` (every script on every reachable server;
+  `--keep-agent`), `state`, `usage` (RAM and scripts per server + threads per target), `player-status`, `bootstrap-purchases`,
+  `stat-eta`, `combat-augmentations`, `infiltrations`. `tools/backdoor/` = `chains` (paste-ready chain for every server still
+  missing a backdoor, faction + company servers first; `--important`), `all`; `tools/corp/` = request tools (add-division,
+  adverts, boosts, expand, exports, limit-production, office, upgrades); `tools/darknet/` = `map`, `crack`;
+  `tools/hacking/` = `batch-plan` (batcher preview), `check-grow`, `debug-hack-plan`; `tools/coding-contracts/` =
+  `describe-type`, `test-solvers`.
+- `workers/hacking/` = `hack`, `grow`, `weaken`, `share` (controller; batcher uses `share` too), `batch-hack`, `batch-grow`,
+  `batch-weaken` (batcher, take an absolute landing time); `workers/corp/` = `read-<call>.js` (11.6 GB) and `do-<action>.js`
+  (21.6 GB), one corporation function each, names built in `lib/corp-scripts.js`; `workers/darknet/` = `crawl`, `phish`.
+- Coding contracts: `lib/contract-solvers.js` (all 30 types; `tools/coding-contracts/describe-type.js` fetches the game's description for a type). Verify with `tools/coding-contracts/test-solvers.js` (dummy contracts, results in data/contract-solver-test-results.txt) before trusting changes; `services/coding-contracts/solver.js` on home only attempts verified types and blocks a type after one real failure. Log: data/coding-contracts.txt (readable lines via lib/log.js; logs the user reads are text, logs only scripts read stay JSON). First run: 10 solved, ~5k CyberSec rep + $50M.
+- Start the hacking service: `node bridge/cli.mjs run start.js [--rep <share fraction>]` (restart: `tools/kill.js <host> services/hacking/batcher.js` first; a new batcher adopts in-flight batches by their landing times).
 - Use meaningful names (user rule, see ~/.claude/CLAUDE.md).

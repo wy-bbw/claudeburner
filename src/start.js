@@ -1,19 +1,19 @@
 import { scanAll } from "lib/net.js";
 import { countOpeners, tryRoot } from "lib/targets.js";
 
-const CONTROLLER = "services/controller.js";
-const BATCHER = "services/batcher.js"; // replaces the controller once Formulas.exe is owned
+const CONTROLLER = "services/hacking/controller.js";
+const BATCHER = "services/hacking/batcher.js"; // replaces the controller once Formulas.exe is owned
 const AGENT = "agent.js";
 // Optional services on home, started in this order while home has room next to the agent.
 // services/server-buyer.js is left out on purpose (2026-10-16): bought servers are of little value in BitNode 4 and the money is
 // needed elsewhere. Start it by hand (run services/server-buyer.js) if you want it again.
-const HOME_SERVICES = ["services/metrics.js", "services/coding-contracts.js", "services/darknet-orchestrator.js"];
+const HOME_SERVICES = ["services/hacking/metrics.js", "services/coding-contracts/solver.js", "services/darknet/orchestrator.js"];
 
 // Cold start after any reset (augmentation install or new BitNode), fits an 8 GB home:
 //   1. root every server the current port openers allow
 //   2. start the optional home services that fit (before the controller fills home with workers)
-//   3. start the hacking service on the biggest rooted server it fits on: services/batcher.js with
-//      Formulas.exe, else services/controller.js. A running controller is replaced by the batcher once
+//   3. start the hacking service on the biggest rooted server it fits on: services/hacking/batcher.js with
+//      Formulas.exe, else services/hacking/controller.js. A running controller is replaced by the batcher once
 //      Formulas.exe is owned (the controller runs this script itself when it sees the file); its jobs
 //      finish on their own, the batcher leaves those targets alone until then.
 //   4. hand over to agent.js via spawn, which frees this script's RAM first

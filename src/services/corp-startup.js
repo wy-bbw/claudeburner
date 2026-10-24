@@ -15,7 +15,7 @@ import { JOBS, officeUpgradeCost } from "lib/corp-offices.js";
 // all other steps need cash and stop the run when it is missing. Not the corp manager: start nothing else meanwhile.
 // --only <step> runs one step (expand, smart-supply, adverts, warehouses, research, upgrades, staff, fill); "research" only
 // waits for the points, the staff step before it puts everyone on R&D.
-// Needs the corporation workers (workers/corp-read-*.js, workers/corp-do-*.js) and ~25 GB free on home, one at a time.
+// Needs the corporation workers (workers/corp/read-*.js, workers/corp/do-*.js) and ~25 GB free on home, one at a time.
 // Log: data/corp-startup.txt.
 // Usage: run services/corp-startup.js --phase startup [--division <name>] [--fill 0.83] [--research-points 75] [--go]
 

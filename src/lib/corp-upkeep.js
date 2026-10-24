@@ -7,13 +7,13 @@ const TOP_UP_MARGIN = 2;
 
 /**
  * @typedef {{division: string, city: CityName, numEmployees: number, avgEnergy: number, maxEnergy: number,
- *   avgMorale: number, maxMorale: number}} OfficeData (workers/corp-read-offices.js)
+ *   avgMorale: number, maxMorale: number}} OfficeData (workers/corp/read-offices.js)
  */
 
 /**
  * Tea for tired offices and parties (sized to reach the maximum morale) for unhappy ones.
  * @param {OfficeData[]} offices
- * @returns {{teaCalls: unknown[][], partyCalls: unknown[][]}} arguments for workers/corp-do-buy-tea.js and corp-do-throw-party.js
+ * @returns {{teaCalls: unknown[][], partyCalls: unknown[][]}} arguments for workers/corp/do-buy-tea.js and workers/corp/do-throw-party.js
  */
 export function upkeepCalls(offices) {
   const staffed = offices.filter((office) => office.numEmployees > 0);

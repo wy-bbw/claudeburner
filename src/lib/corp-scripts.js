@@ -1,7 +1,7 @@
 import { CORPORATION_ACTION_PORT } from "lib/ports.js";
 
 // Runs corporation worker scripts on home. Every corporation call costs 10 GB (reads) or 20 GB (actions), so each
-// call lives in its own small script (workers/corp-read-*.js, workers/corp-do-*.js) and home runs one at a time.
+// call lives in its own small script (workers/corp/read-*.js, workers/corp/do-*.js) and home runs one at a time.
 // Several services share home's free RAM: when a script does not fit yet, wait and try again.
 
 const WAIT_REPORT_MS = 60_000;
@@ -29,7 +29,7 @@ export async function runCorporationScript(ns, script, outputFile, args) {
 
 /** Reader workers write data/corp/<name>.txt. @param {NS} ns @param {string} name @param {string[]} args */
 export function runReader(ns, name, args) {
-  return runCorporationScript(ns, `workers/corp-read-${name}.js`, `data/corp/${name}.txt`, args);
+  return runCorporationScript(ns, `workers/corp/read-${name}.js`, `data/corp/${name}.txt`, args);
 }
 
 /**
@@ -39,7 +39,7 @@ export function runReader(ns, name, args) {
  * @returns {Promise<{args: unknown[], ok: boolean, error?: string}[]>}
  */
 export function runAction(ns, action, calls) {
-  return runCorporationScript(ns, `workers/corp-do-${action}.js`, `data/corp/do-${action}.txt`, [JSON.stringify(calls)]);
+  return runCorporationScript(ns, `workers/corp/do-${action}.js`, `data/corp/do-${action}.txt`, [JSON.stringify(calls)]);
 }
 
 /**
@@ -48,7 +48,7 @@ export function runAction(ns, action, calls) {
  * @returns {Promise<{args: unknown[], ok: boolean, error?: string}[]>}
  */
 export async function runActionByPort(ns, action, calls) {
-  const script = `workers/corp-do-${action}.js`;
+  const script = `workers/corp/do-${action}.js`;
   const needed = ns.getScriptRam(script, "home");
   if (needed > ns.getServerMaxRam("home")) throw new Error(`${script} needs ${needed} GB, more than home has`);
   ns.clearPort(CORPORATION_ACTION_PORT);

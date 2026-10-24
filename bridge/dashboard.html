@@ -168,7 +168,7 @@ function attachHover(container, points, geometry, format, suffix, key) {
   if (hoverPositions[key] !== undefined) show(hoverPositions[key]);
 }
 
-// Corporation (services/corp-status.js, every 20 s): headline numbers, investment offer, valuation history, one row per city.
+// Corporation (services/corp/status.js, every 20 s): headline numbers, investment offer, valuation history, one row per city.
 const JOB_SHORT = { Operations: "Ops", Engineer: "Eng", Business: "Bus", Management: "Mgt", "Research & Development": "R&D", Intern: "Int" };
 function renderCorporation(corp) {
   const card = el("card-corp");
@@ -207,7 +207,7 @@ function renderCorporation(corp) {
   const age = Math.round((Date.now() - corp.time) / 1000);
 
   card.innerHTML = `<h2>Corporation: ${esc(c.name)}</h2>${tiles}
-    <div class="muted" style="font-size:12px;margin-bottom:8px">${divisions}${age > 60 ? ` · <b>data ${age} s old: is services/corp-status.js running?</b>` : ""}</div>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">${divisions}${age > 60 ? ` · <b>data ${age} s old: is services/corp/status.js running?</b>` : ""}</div>
     <div class="muted" style="font-size:12px;margin-bottom:4px">Valuation, last 2 h (log scale; the investment offer is 30% of it in round 1)</div>
     <div class="chart" style="position:relative;margin-bottom:12px">${chart ? chart.svg : '<p class="muted">History starts now: one point every 20 s.</p>'}<div class="tooltip"></div></div>
     <table><thead><tr><th>Division</th><th>City</th><th>Employees</th><th class="num">Energy / morale</th><th class="num">Warehouse</th><th>Output</th></tr></thead><tbody>${rows}</tbody></table>`;

@@ -10,8 +10,8 @@ export const UPGRADE_PRICES = {
   "ABC SalesBots": { basePrice: 1e9, priceMult: 1.07 },
   "Project Insight": { basePrice: 5e9, priceMult: 1.07 },
 };
-// Bought by tools/corp-upgrades.js: production, storage, employee stats (production, product rating, quality), RP.
-// Not Wilson Analytics (services/corp-manager.js buys it with Advert) and not ABC SalesBots (products sell out anyway).
+// Bought by tools/corp/upgrades.js: production, storage, employee stats (production, product rating, quality), RP.
+// Not Wilson Analytics (services/corp/manager.js buys it with Advert) and not ABC SalesBots (products sell out anyway).
 export const AUTO_UPGRADES = ["Smart Factories", "Smart Storage", "Neural Accelerators", "FocusWires",
   "Speech Processor Implants", "Nuoptimal Nootropic Injector Implants", "Project Insight"];
 

@@ -1,8 +1,8 @@
 import { BOOST_MATERIALS } from "lib/corp-boosts.js";
 import { readCorporationState } from "lib/corp-state.js";
 
-// The corporation API called in this process, for services/corp-manager.js: no state file, no reader scripts.
-// Each reader below is the body of workers/corp-read-<name>.js (same output), returning the data instead of writing a file.
+// The corporation API called in this process, for services/corp/manager.js: no state file, no reader scripts.
+// Each reader below is the body of workers/corp/read-<name>.js (same output), returning the data instead of writing a file.
 // RAM: every distinct corporation call used in this file costs 10 GB (11 calls ~ 110 GB). The 20 GB action calls stay in
 // the workers (lib/corp-scripts.js runActionByPort): all of them in one script would not fit into 512 GB.
 

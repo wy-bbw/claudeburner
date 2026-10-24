@@ -1,10 +1,10 @@
 import { scanAll } from "lib/net.js";
 
 const REPORT_FILE = "data/usage.txt";
-const WORKER_PREFIX = "workers/";
+const WORKER_PREFIX = "workers/hacking/"; // their first argument is the target
 
 // usage.js [--all]: RAM and running scripts per rooted server, then worker threads per target.
-// Workers are summed per script and target ("workers/grow.js 120t -> harakiri-sushi 80, n00dles 40").
+// Workers are summed per script and target ("workers/hacking/grow.js 120t -> harakiri-sushi 80, n00dles 40").
 // --all also lists idle and unrooted servers (unrooted RAM is not counted in the total). Also written to data/usage.txt.
 /** @param {NS} ns */
 export async function main(ns) {

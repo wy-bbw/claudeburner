@@ -1,8 +1,8 @@
 // Collects the dashboard's data from files on home (read through the Remote API):
-//   data/metrics.txt          one JSON sample every 10 s (services/metrics.js): income over time, hacking level
+//   data/metrics.txt          one JSON sample every 10 s (services/hacking/metrics.js): income over time, hacking level
 //   data/state.txt            the batcher's JSON snapshot: threads, share, counters, targets
-//   data/darknet.txt          services/darknet-orchestrator.js log: sweep summaries and events
-//   data/coding-contracts.txt services/coding-contracts.js log: solved contracts and rewards
+//   data/darknet.txt          services/darknet/orchestrator.js log: sweep summaries and events
+//   data/coding-contracts.txt services/coding-contracts/solver.js log: solved contracts and rewards
 // Every field is optional on the page: a missing file (service not running) yields null.
 
 const INCOME_HISTORY_MINUTES = 120;
@@ -30,7 +30,7 @@ export async function collectDashboardData(call) {
   };
 }
 
-/** services/corp-status.js snapshot plus the last 2 h of history (one line per 20 s). */
+/** services/corp/status.js snapshot plus the last 2 h of history (one line per 20 s). */
 function corporationFromState(stateText, historyText) {
   let state;
   try { state = JSON.parse(stateText); } catch { return null; }

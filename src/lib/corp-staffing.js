@@ -1,4 +1,4 @@
-// Job splits and input-quality checks for services/corp-manager.js, from the game code (v3.0.1, src/Corporation/Division.ts,
+// Job splits and input-quality checks for services/corp/manager.js, from the game code (v3.0.1, src/Corporation/Division.ts,
 // Product.ts, OfficeSpace.ts). Pure functions on the manager's state (lib/corp-state.js shape): no ns calls, no RAM.
 // - Research: researchShare of every office's workers on R&D (research points raise product rating x (1 + RP^scienceFactor
 //   / 800) and material quality + RP^scienceFactor; each office adds 0.004 x sqrt(R&D production), so spreading pays),
