@@ -25,16 +25,18 @@ const MIN_HP_FRACTION = 0.7; // visit the hospital below this before starting (a
 //   --money-floor <n>     sell for money instead of rep while your money is below n (default 0 = always rep)
 //   --max-difficulty <n>  never pick a target above this difficulty (default 3.4; the game kills you at 3.5)
 //   --cities <list>       only these cities, comma-separated (default: all; e.g. "New Tokyo" or "Sector-12,Volhaven")
-//   --runs <n>            stop after n infiltrations (default: never)
+//   --runs <n>            stop after n infiltrations (default 3; Infinity = never)
+//   --stop-at-money <n>   stop once your money is at least n, checked between runs (e.g. 150e9; default: never)
 //   --min-demand <f>      start a run only when the market demand is at least this (default 0.75; 0 = never wait)
 //   --return-city <name>  travel here when the autopilot ends, so the gym trainer has a gym ("none" = stay; default Sector-12)
 // Log: data/infiltration-autopilot.txt. Stop it (mid-run it just leaves the infiltration open) with tools/kill.js.
 // Do not run it together with services/infiltration-solver.js. It travels between cities (costs money), so stop
 // services/gym-trainer.js if you want a fixed city: the trainer never travels but waits in cities without a gym.
-// Usage: run services/infiltration-autopilot.js --faction "The Syndicate" [--cities "New Tokyo"] [--money-floor 1e9]
+// Usage: run services/infiltration-autopilot.js --faction "The Syndicate" [--cities "New Tokyo"] [--money-floor 1e9] [--stop-at-money 150e9]
 /** @param {NS} ns */
 export async function main(ns) {
-  const options = ns.flags([["faction", ""], ["money-floor", 0], ["max-difficulty", 3.4], ["cities", ""], ["runs", Infinity], ["min-demand", 0.75], ["return-city", "Sector-12"]]);
+  const options = ns.flags([["faction", ""], ["money-floor", 0], ["max-difficulty", 3.4], ["cities", ""], ["runs", 3], ["stop-at-money", Infinity], ["min-demand", 0.75], ["return-city", "Sector-12"]]);
+  const stopAtMoney = Number(options["stop-at-money"]);
   const minDemand = Math.min(Number(options["min-demand"]), 0.99);
   const returnCity = String(options["return-city"]);
   const faction = String(options.faction);
@@ -45,7 +47,8 @@ export async function main(ns) {
   ns.disableLog("ALL");
   ns.ui.openTail();
   const say = (/** @type {string} */ event, /** @type {string} */ details) => { ns.print(`${event}: ${details}`); appendLog(ns, LOG_FILE, event, details); };
-  say("start", `faction ${faction || "(none: money)"}, money floor ${moneyFloor}, max difficulty ${maxDifficulty}, cities ${cities.join(",") || "all"}`);
+  say("start", `faction ${faction || "(none: money)"}, money floor ${moneyFloor}, max difficulty ${maxDifficulty}, cities ${cities.join(",") || "all"}, `
+    + `runs ${maxRuns}${stopAtMoney < Infinity ? `, stop at $${ns.format.number(stopAtMoney)}` : ""}`);
 
   let runs = 0;
   let wait = { until: 0, reason: "" }; // pause between failed attempts
@@ -62,6 +65,10 @@ export async function main(ns) {
   while (runs < maxRuns) {
     try {
       const infiltration = findInfiltration();
+      if (!infiltration && !opening.since && ns.getPlayer().money >= stopAtMoney) {
+        say("money", `$${ns.format.number(ns.getPlayer().money)} >= $${ns.format.number(stopAtMoney)}: stopping`);
+        break;
+      }
       if (infiltration) {
         opening.since = 0;
         const kind = stageKind(infiltration.stage);
