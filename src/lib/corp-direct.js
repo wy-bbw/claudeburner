@@ -66,16 +66,18 @@ export async function runReader(ns, name, args) {
     case "products": {
       const places = /** @type {{division: string, cities: CityName[], names: string[]}[]} */ (JSON.parse(args[0]));
       while ((await corporation.nextUpdate()) !== "SALE");
-      return places.flatMap(({ division, cities, names }) => cities.flatMap((city) => names.map((productName) => {
-        const product = corporation.getProduct(division, city, productName);
-        return {
+      // The names were read before the wait: a product discontinued meanwhile is skipped (getProduct would throw).
+      return places.flatMap(({ division, cities, names }) => cities.flatMap((city) => names.flatMap((productName) => {
+        let product;
+        try { product = corporation.getProduct(division, city, productName); } catch { return []; }
+        return [{
           division, city, name: productName, developmentProgress: product.developmentProgress, rating: product.rating,
           effectiveRating: product.effectiveRating, desiredSellAmount: product.desiredSellAmount,
           desiredSellPrice: product.desiredSellPrice, stored: product.stored, productionAmount: product.productionAmount,
           actualSellAmount: product.actualSellAmount, productionCost: product.productionCost,
           demand: product.demand, competition: product.competition, quality: product.stats.quality,
           designInvestment: product.designInvestment, advertisingInvestment: product.advertisingInvestment,
-        };
+        }];
       })));
     }
     case "research-status": {

@@ -7,6 +7,10 @@
 // - Buying onto existing stock with a space limit and a budget (bestBoostPurchase): what is held stays (nothing is sold);
 //   KKT: amount_i = max(held_i, factor_i / (lambda * size_i + mu * price_i) - 500), lambda for the space, mu for the budget.
 // - Warehouse upgrade from level L by n levels costs sum over k < n of 1e9 * 1.07^(L + 1 + k); size is linear in level.
+// - Warehouse size = level x 100 x (1 + 0.1 x Smart Storage); Smart Factories = +3% production per level (game data
+//   CorporationUpgrades.ts, Warehouse.ts updateSize). bestStorageUpgrades searches all combinations within a budget.
+
+import { upgradeCost } from "lib/corp-upgrades.js";
 
 export const BOOST_MATERIALS = /** @type {const} */ (["Real Estate", "Hardware", "Robots", "AI Cores"]);
 const WAREHOUSE_UPGRADE_BASE_COST = 1e9;
@@ -149,4 +153,42 @@ function planCity(city, level, factors, sizes, baseCosts, fill, budget) {
   const purchase = bestBoostPurchase(boostSpace, city.stored, prices, budget, factors, sizes);
   return { city: city.city, levels: level - city.level, upgradeCost: warehouseUpgradeCost(city.level, level - city.level),
     purchases: purchase.purchases, purchaseCost: purchase.cost, boostSpace, newSize, multiplier: boostMultiplier(purchase.amounts, factors) };
+}
+
+const STORAGE_SEARCH_LEVELS = 40;
+const SMART_FACTORIES_BENEFIT = 0.03, SMART_STORAGE_BENEFIT = 0.1;
+
+/**
+ * Warehouse level (the same in every city), Smart Storage and Smart Factories levels with the highest production within
+ * `budget`, when the warehouses are then filled to `fill` with the optimal boost mix (the fill itself is not paid from the
+ * budget). Production ~ (1 + 0.03 x Smart Factories) x boost multiplier; exhaustive search.
+ * @param {{levels: number[], smartStorage: number, smartFactories: number}} current warehouse level per city, upgrade levels
+ * @param {number} budget @param {number} fill @param {Record<string, number>} factors @param {Record<string, number>} sizes
+ * @returns {{level: number, smartStorage: number, smartFactories: number, size: number, cost: number, production: number, baseline: number}}
+ */
+export function bestStorageUpgrades(current, budget, fill, factors, sizes) {
+  const production = (/** @type {number} */ level, /** @type {number} */ smartStorage, /** @type {number} */ smartFactories) =>
+    (1 + SMART_FACTORIES_BENEFIT * smartFactories)
+    * boostMultiplier(optimalBoosts(fill * 100 * level * (1 + SMART_STORAGE_BENEFIT * smartStorage), factors, sizes), factors);
+  const startLevel = Math.max(1, ...current.levels);
+  const warehouseCost = (/** @type {number} */ level) =>
+    current.levels.reduce((sum, cityLevel) => sum + warehouseUpgradeCost(cityLevel, Math.max(0, level - cityLevel)), 0);
+  const baseline = production(startLevel, current.smartStorage, current.smartFactories);
+  let best = { level: startLevel, smartStorage: current.smartStorage, smartFactories: current.smartFactories, cost: warehouseCost(startLevel), production: baseline };
+  let storageCost = 0;
+  for (let storage = current.smartStorage; storage <= current.smartStorage + STORAGE_SEARCH_LEVELS; storage++) {
+    if (storage > current.smartStorage) storageCost += upgradeCost("Smart Storage", storage - 1);
+    let factoriesCost = 0;
+    for (let factories = current.smartFactories; factories <= current.smartFactories + STORAGE_SEARCH_LEVELS; factories++) {
+      if (factories > current.smartFactories) factoriesCost += upgradeCost("Smart Factories", factories - 1);
+      if (storageCost + factoriesCost > budget) break;
+      for (let level = startLevel; level <= startLevel + STORAGE_SEARCH_LEVELS; level++) {
+        const cost = storageCost + factoriesCost + warehouseCost(level);
+        if (cost > budget) break;
+        const value = production(level, storage, factories);
+        if (value > best.production) best = { level, smartStorage: storage, smartFactories: factories, cost, production: value };
+      }
+    }
+  }
+  return { ...best, size: 100 * best.level * (1 + SMART_STORAGE_BENEFIT * best.smartStorage), baseline };
 }

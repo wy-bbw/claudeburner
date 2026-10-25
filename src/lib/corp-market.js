@@ -9,8 +9,12 @@
 // - Markup limit = material quality / base markup of the material, or product effectiveRating / product markup.
 // - Above MP + markup limit the game sells potential x (markupLimit / (price - MP))^2, so the highest price that sells
 //   `target` per second is MP + markupLimit x sqrt(potential / target) (what Market-TA.II sets).
-// - The product markup is hidden but fixed per product: measured once from a cycle that left stock while priced above
-//   MP + markup limit: markupLimit = (price - MP) x sqrt(sold / potential), markup = effectiveRating / markupLimit.
+// - The product markup is hidden but fixed per product: measured from cycles that left stock while priced above
+//   MP + markup limit: markupLimit = (price - MP) x sqrt(sold / potential), markup = effectiveRating / markupLimit. A single
+//   measurement can be far off (2026-10-25: madig products priced ~1000x too low after one measurement during a supply
+//   failure), so the last MARKUP_SAMPLES measurements are kept (all cities of the product) and their median is used; if the
+//   product still sells out for SOLD_OUT_PROBE_CALLS calls in a row, the price is raised x1.5 per further sold-out call
+//   until a cycle leaves stock again and gives a new measurement.
 //   Until then it is estimated from the game's own formula (Product.ts finishProduct): markup = 100 / ((1 +
 //   advertisingInvestment^0.1 / 100) x (quality + 0.001)^0.65 x (Business + Management share of the development office's job
 //   production)); the share is taken from that office now (the API does not show it from the development time), and the
@@ -20,6 +24,14 @@
 const SOLD_OUT_TOLERANCE = 0.01;
 const DRAIN_CYCLES = { product: 5, material: 1 };
 const ESTIMATE_OVERSHOOT = 1.5;
+/** Markup measurements kept per product (about 3 cycles x 6 cities). */
+const MARKUP_SAMPLES = 18;
+/** Sold-out calls (cities x cycles) in a row before the price is raised to get a new measurement. */
+const SOLD_OUT_PROBE_CALLS = 12;
+
+/** @param {number[]} values */
+const median = (values) => { const sorted = [...values].sort((a, b) => a - b); const middle = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2; };
 
 /**
  * @typedef {{kind: "product" | "material", marketPrice: number, delta: number, sold: number, supply: number, leftover: number,
@@ -57,7 +69,8 @@ export function estimatedProductMarkup(item) {
 /**
  * The Market-TA.II price above MP for one item in one city, or null when it cannot be computed yet (no demand data, or a
  * product whose markup is not measured and could not be measured from the last cycle): then probe instead.
- * @param {MarketItem} item @param {{markup?: number, overshoot?: number}} productMemory per product (shared by its cities), kept between calls
+ * @param {MarketItem} item @param {{samples?: number[], overshoot?: number, soldOutCalls?: number, probe?: number}} productMemory
+ *   per product (shared by its cities), kept between calls
  * @returns {{delta: number, reason: string} | null}
  */
 export function marketTa2Delta(item, productMemory) {
@@ -69,13 +82,20 @@ export function marketTa2Delta(item, productMemory) {
   let markupLimit;
   if (item.kind === "material") markupLimit = item.quality / (item.baseMarkup || 1);
   else {
-    // Measure the product markup when the last cycle was priced in the penalty range and left stock.
-    if (!productMemory.markup && stockLeft && item.delta > 0 && item.sold > 0 && item.sold < 0.98 * potential) {
+    // Measure the product markup whenever the last cycle was priced in the penalty range and left stock.
+    if (stockLeft && item.delta > 0 && item.sold > 0 && item.sold < 0.98 * potential) {
       const measuredLimit = item.delta * Math.sqrt(item.sold / potential);
-      if (measuredLimit > 0) productMemory.markup = Math.max(item.quality, 0.001) / measuredLimit;
+      if (measuredLimit > 0) {
+        productMemory.samples = [...(productMemory.samples ?? []), Math.max(item.quality, 0.001) / measuredLimit].slice(-MARKUP_SAMPLES);
+      }
     }
-    if (productMemory.markup) markupLimit = Math.max(item.quality, 0.001) / productMemory.markup;
-    else {
+    if (productMemory.samples?.length) {
+      // Sold out again and again at the median: the limit is too low; raise the price until a cycle leaves stock.
+      productMemory.soldOutCalls = stockLeft ? 0 : (productMemory.soldOutCalls ?? 0) + 1;
+      if (stockLeft) productMemory.probe = 1;
+      else if (productMemory.soldOutCalls > SOLD_OUT_PROBE_CALLS) productMemory.probe = (productMemory.probe ?? 1) * ESTIMATE_OVERSHOOT;
+      markupLimit = Math.max(item.quality, 0.001) / median(productMemory.samples) * (productMemory.probe ?? 1);
+    } else {
       const estimate = estimatedProductMarkup(item);
       if (!estimate) return null;
       // Sold out at the estimated price: the estimate was too low a limit; overshoot more.
@@ -89,7 +109,9 @@ export function marketTa2Delta(item, productMemory) {
   }
   // How well the formula predicted the last cycle (logged; 1.00 = exact): sold = potential x min(1, (limit / delta)^2).
   const predicted = item.delta > markupLimit ? potential * (markupLimit / item.delta) ** 2 : potential;
-  const check = stockLeft ? `, last cycle sold ${(item.sold / predicted).toFixed(2)} x predicted` : "";
+  const check = (stockLeft ? `, last cycle sold ${(item.sold / predicted).toFixed(2)} x predicted` : "")
+    + (item.kind === "product" && (productMemory.probe ?? 1) > 1 ? `, sold out: probing x${(productMemory.probe ?? 1).toFixed(2)}` : "")
+    + (item.kind === "product" ? `, ${productMemory.samples?.length ?? 0} markup samples` : "");
   const target = Math.max(item.supply, 1e-9) + item.leftover / (10 * DRAIN_CYCLES[item.kind]);
   return {
     delta: markupLimit * Math.sqrt(potential / target),

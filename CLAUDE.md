@@ -8,6 +8,21 @@ prep the next target in parallel. Verify every model/claim with the metrics samp
 baseline vs change, marks in `marks.txt`) — formulas from memory have been wrong before.
 Lesson: every server starts at 4% of max money; low-growth targets need hours of prep (sigma-cosmetics ~5 h), n00dles ~1 min.
 
+## Status (2026-10-25): BitNode 5 started (SF1.1, SF3.3, SF4.1; home 512 GB)
+- BN5 multipliers (read live with `tools/bitnode-status.js`): ScriptHackMoney 0.15 but ServerMaxMoney 1 (BN4 0.1125,
+  so hacking pays ~6.7x BN4), ServerStartingMoney 0.5, ServerStartingSecurity 2, HackExpGain 0.5, InfiltrationMoney/Rep
+  1.5, CrimeMoney 0.5, AugmentationMoneyCost 2, CorporationValuation 0.75, CorporationDivisions 0.75,
+  WorldDaemonDifficulty 1.5 = hacking 4500. No corp softcap penalty. SF3.3: Office/Warehouse API free. Reward SF5 =
+  Intelligence, permanent Formulas.exe, getBitNodeMultipliers, hacking mults +8%.
+- BN5 start: money from infiltration (VitaLife ~$9m/s at 75% demand) + hacking ~$3m/s until $150b for the corporation.
+- BitNode order after BN5 (user, 2026-10-25): BN10.1 (sleeves) -> BN2 (gangs) -> BN4.2/4.3 (Singularity RAM x4/x1)
+  -> maybe BN10.2/10.3 later (only +1 sleeve each). Game code: SF10 = 1 sleeve per level; The Covenant sells 5 more,
+  only while in BN10, $10t x 10^n each (~$111q for all five); memory upgrades also only in BN10 -> buy everything before
+  leaving BN10.1. BN10: hacking level x0.35, other stats x0.4, aug cost x5 money / x2 rep, CorporationValuation 0.5,
+  CorporationSoftcap 0.9, WorldDaemonDifficulty 2. BN2: CrimeMoney 3, InfiltrationMoney 3, CorporationSoftcap 0.9,
+  HackingLevelMultiplier 0.8, WorldDaemonDifficulty 5 (= hacking 15000: the long pole); SF2 = gangs elsewhere at -54k karma.
+  Unchecked: gang without karma inside BN2, Covenant sleeves kept across BitNodes, Covenant invite requirements.
+
 ## Status (2026-10-16): BitNode 3 done, BitNode 4 next
 - BN3 result (2 days): corporation profit $2.7M/s -> ~$1.8e28/s, personal money ~1e49 (dividends + shares), all
   augmentations via corporation bribes ($1b corp funds per faction rep point) and company work (8k company rep/s with
@@ -83,9 +98,12 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   `--max-difficulty` (3; at >= 3.5 the game kills you). `tools/infiltrations.js` lists targets by money/rep per difficulty.
   `services/infiltration-autopilot.js` (24.6 GB) runs the whole loop: best reward/s target (API reward includes the market demand), travel, `goToLocation`,
   presses Infiltrate Company by calling the button handler with `{isTrusted:true}`, solves (shared `lib/infiltration-minigames.js`), then trades for
-  `--faction` rep (React Select onChange + Trade button) or sells (`--money-floor`), hospital below 70% hp. Tested live 2026-10-17: 1 full run, 20 levels in ~32 s.
+  `--faction` rep (React Select onChange + Trade button) or sells (`--money-floor`), hospital below 70% hp; `--stop-at-money <n>` ends it between runs.
+  Market demand is ONE global value (game code `InfiltrationState`), not per company: alternating targets does not help. Tested live 2026-10-17: 1 full run, 20 levels in ~32 s.
   Starting it while a success screen is open pays that infiltration out immediately.
-- Combat stats (2026-10-17): `services/gym-trainer.js` (7.6 GB, Singularity) trains the lowest combat stat in the gym of the city you are in (Sector-12
+- Combat stats (2026-10-17): `services/gym-trainer.js` (7.6 GB, Singularity) trains, since 2026-10-25, the combat stat with the most levels per
+  exp (multiplier read back from level + exp; infiltration difficulty = base - (str+def+dex+agi+cha)^0.9 / 250 - int / 1600, game
+  code), `--order lowest` = lowest first (The Syndicate's 200 each) in the gym of the city you are in (Sector-12
   Powerhouse x10 exp, Aevum Snap x5, Volhaven Millenium x4; never travels unless `--travel`/`--gym`), unfocused by default (`--foreground` = x1.25
   exp). `tools/stat-eta.js` = time to level N (default 200 = The Syndicate); `tools/combat-augmentations.js` = unowned combat augs of your
   factions. Level = floor(mult x (32 ln(exp+534.5) - 200)): level multipliers cut the needed exp exponentially (agility x1.66 was the bottleneck).
@@ -113,7 +131,7 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   agent.js only, no hacking or hacking-economy home services (corp calls cost 10-20 GB each; services/corp/manager.js needs ~115 GB + 21.6 GB). start.js
   would start those again. Corp scripts: one corporation function per worker script (`workers/corp/read-*.js` 11.6 GB,
   `workers/corp/do-<action>.js` 21.6 GB, taking a JSON list of calls), run one at a time via `lib/corp-scripts.js`
-  (waits for free RAM). services/corp/manager.js: products (develop, discontinue the worst, sell), custom Market-TA.II pricing (since 2026-10-18 the game's TA2 formula in `lib/corp-market.js` when the Demand + Competition unlocks are bought: price = MP + markupLimit x sqrt(potential / units to sell), potential = quality factor x demand x (100-competition)/100 x business x SalesBots x advertising; product markup measured once per product from an overshoot, probing until then; without the two unlocks the manager sets no prices at all, detected for free from demand/competition being undefined, hasUnlock would cost 10 GB)
+  (waits for free RAM). services/corp/manager.js: products (develop, discontinue the worst, sell), custom Market-TA.II pricing (since 2026-10-18 the game's TA2 formula in `lib/corp-market.js` when the Demand + Competition unlocks are bought: price = MP + markupLimit x sqrt(potential / units to sell), potential = quality factor x demand x (100-competition)/100 x business x SalesBots x advertising; product markup = median of the last 18 measurements (cycles that left stock), raised x1.5 per call after ~2 sold-out cycles until stock is left again (2026-10-25: one bad measurement had priced madig ~1000x too low), formula estimate x overshoot until the first measurement; without the two unlocks the manager sets no prices at all, detected for free from demand/competition being undefined, hasUnlock would cost 10 GB)
   for products and materials (`lib/corp-pricing.js`: C = sold x (price-MP)^2 from a cycle with stock left, price =
   MP + sqrt(C/supply); log data/corp-manager.txt, prices data/corp-prices.txt), Wilson + Advert (`--hold-upgrades`
   before accepting an offer). `tools/corp/exports.js` sets the Agriculture/Chemical/Tobacco exports + Smart Supply
@@ -128,7 +146,26 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 - Startup (2026-10-18): `services/corp-startup.js` (2.9 GB, dry run unless `--go`; `--phase startup|after-round-1`, `--only <step>`) does the
   startup recipe (memory note corp-startup-recipe) step by step through the corp workers (new `workers/corp/do-purchase-unlock.js`).
   Create the corporation and the Agriculture division by hand first; do not run the corp manager during startup.
+  Its "storage" step puts all cash but `--reserve` into warehouse levels / Smart Storage / Smart Factories, picking the
+  combination with the highest production after the fill (`bestStorageUpgrades`; size = level x 100 x (1 + 0.1 x Smart Storage),
+  Smart Factories +3%/level, from the game data): storage always beats Smart Factories at startup budgets.
+  `--phase after-round-1` (the user's approach, 2026-10-23): unlocks (Demand, Competition, Smart Supply, Export), a Chemical
+  division (`--chemical <name>`; new workers `workers/corp/do-expand-industry.js`, `workers/corp/read-unlocks.js`) in all cities, offices 6
+  (1/2/1/1/1), Smart Supply with "leftovers", exports Plants -> Chemical and Chemicals -> Agriculture at (IPROD+IINV/10)*(-1) (replacing an existing export with another amount: new worker `workers/corp/do-cancel-export-material.js`), Chemicals
+  MAX/MP, Chemical warehouses +3, Agriculture +3 R&D employees, fill both, wait 700 RP (Agriculture),
+  then its R&D staff to Operations/Business (3/1/2/1; Chemical stays 1/2/1/1/1); asks for the Chemical name (ns.prompt) unless given or existing. `--phase product-division` (2026-10-25): Tobacco division (`--product <name>`, `--product-industry`) in all cities, Smart Supply, Plants export from Agriculture, Aevum 20 employees (development split), first product there (`--product-investment` 1% each), warehouses +2, other offices as large as the cash allows up to Aevum's size (half R&D); no fill (separately: `--only fill --division <name> --fill 0.8`). `--phase after-round-1-fixed` = the earlier hand plan (Wilson 4, ..., warehouses
+  10, 6 employees, Advert 16, fill);
+  `--phase after-round-1-optimized` (step "growth", worse in its one test: ~$2t round-2 offer vs ~$3.2t expected): Wilson (`--wilson-fraction` 0.15), then Advert
+  (`--advert-fraction` 0.05), the rest into office size / warehouse level / Smart Storage / Smart Factories / ABC SalesBots
+  for the most revenue under our TA.II prices (`lib/corp-growth-plan.js` bestRevenuePlan: production x MP + markup limit x
+  sqrt(potential x production), office productivity (Ops^0.4 + Eng^0.3)(1 + Mgmt/(1.2 total)) and business factor from the
+  game code); without the Demand + Competition unlocks by production only. Then the fill (debt).
   `services/corp/growth.js` is an older blank stub.
+  `services/corp/supply.js` (2026-10-23, 2.9 GB, started by start-corporation.js) replaces the Smart Supply unlock (~$26b):
+  per market cycle, after SALE, it sets each input's buy order from the last cycle's consumption (input productionAmount
+  < 0), doubling the estimate while an input runs out, minus the stock (imports arrive after PRODUCTION, so the stock read after SALE already holds them; `lib/corp-supply.js`, logic from the game's
+  Division.ts PURCHASE state). Buy orders persist when it stops: `run services/corp/supply.js --stop` sets them to 0.
+  bulkPurchase cannot go into debt (checked per call against funds); buy orders can (corp-startup's fill uses them).
 - Product formulas (game source v3.0.1, github bitburner-official/bitburner-src src/Corporation/Product.ts, Division.ts; the Steam
   folder is not readable from the sandbox): only the creation city's office develops a product; markup = 100 / (quality^0.65 x
   (Business+Management share)), so Market-TA.II revenue ~ rating^1.325 x quality^0.65 x that share (best ~36% Engineers / 64%
@@ -181,10 +218,11 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   `corp-upkeep.js`. `services/hacking/` = `controller.js` or, with Formulas.exe, `batcher.js` (HWGW batches; planner in
   `lib/batch-planner.js`, log data/batcher.txt) on a rooted server, `metrics.js` on home; `services/coding-contracts/solver.js`;
   `services/darknet/orchestrator.js`; `services/corp/` = `status.js` (corp state every 20 s -> data/corp-state.txt +
-  data/corp-history.txt for the dashboard), `manager.js`, `growth.js` (stub).
+  data/corp-history.txt for the dashboard), `manager.js`, `supply.js`, `growth.js` (stub).
 - `tools/` top level: `root`, `path` (backdoor connect chain), `kill`, `kill-all` (every script on every reachable server;
   `--keep-agent`), `state`, `usage` (RAM and scripts per server + threads per target), `player-status`, `bootstrap-purchases`,
-  `stat-eta`, `combat-augmentations`, `infiltrations`. `tools/backdoor/` = `chains` (paste-ready chain for every server still
+  `stat-eta`, `combat-augmentations`, `buy-augmentations` (Singularity: all affordable augmentations of your factions, most
+  expensive first, prerequisites first, then NeuroFlux to the max; `--dry-run`, `--keep <$>`, `--no-neuroflux`), `infiltrations`. `tools/backdoor/` = `chains` (paste-ready chain for every server still
   missing a backdoor, faction + company servers first; `--important`), `all`; `tools/corp/` = request tools (add-division,
   adverts, boosts, expand, exports, limit-production, office, upgrades); `tools/darknet/` = `map`, `crack`;
   `tools/hacking/` = `batch-plan` (batcher preview), `check-grow`, `debug-hack-plan`; `tools/coding-contracts/` =

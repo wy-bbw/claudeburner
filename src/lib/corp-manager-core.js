@@ -12,6 +12,9 @@ import { marketTa2Delta } from "lib/corp-market.js";
 const LOG_FILE = "data/corp-manager.txt";
 const PRICES_FILE = "data/corp-prices.txt";
 const REQUESTS_FILE = "data/corp-requests.txt";
+const REBALANCE_PAUSE_MS = 60_000;
+/** When each division's jobs were last reassigned because of unassigned employees or surplus interns. @type {Map<string, number>} */
+const lastRebalance = new Map();
 const INTERVAL_MS = 5_000;
 const WILSON = "Wilson Analytics";
 // Upgrade cost = base price x price multiplier ^ level (game code).
@@ -151,6 +154,23 @@ export async function runCorporationManager(ns) {
       log("reinvest", `queued upgrades 20%; main office 15%, all offices 10%, boosts 10% of funds split over ${growing.map((entry) => entry.name).join(", ") || "no product division"}; suppliers (starved or quality-limited consumers, 5% + 5%): ${suppliers.join(", ") || "none"}`);
     }
 
+    // Offices with unassigned employees or more interns than the 1/9 they need (HRBuddy research hires every cycle, as
+    // interns with HRBuddy-Training; enlarged offices fill up between reinvest rounds): reassign them now, at no cost.
+    if (!flags["upkeep-and-prices-only"]) {
+      const queuedNow = ns.read(REQUESTS_FILE);
+      const unbalanced = [...new Set((state.offices ?? []).filter((/** @type {{size: number, employeeJobs: Record<string, number>}} */ office) =>
+        (office.employeeJobs?.Unassigned ?? 0) > 0 || (office.employeeJobs?.Intern ?? 0) > (office.size >= 9 ? Math.ceil(office.size / 9) : 0))
+        .map((/** @type {{division: string}} */ office) => office.division))]
+        // Job changes take effect in the next cycle (employeeNextJobs): give a reassignment a minute to show.
+        .filter((division) => !queuedNow.includes(`"division":"${division}"`) && Date.now() - (lastRebalance.get(division) ?? 0) > REBALANCE_PAUSE_MS);
+      if (unbalanced.length) {
+        const time = Date.now();
+        for (const division of unbalanced) lastRebalance.set(division, time);
+        ns.write(REQUESTS_FILE, unbalanced.map((division) => JSON.stringify({ type: "office", division, city: "all", size: 0, budgetFraction: 0, jobs: null, time }) + "\n").join(""), "a");
+        log("staff", `unassigned employees or surplus interns in ${unbalanced.join(", ")}: jobs reassigned`);
+      }
+    }
+
     // Requests from tools (they only queue a line: the workers need the RAM a running tool would take).
     // Only on a state read entirely after the previous request: a request must see what the last one changed.
     const requests = (state.readStartTime ?? 0) > lastRequestTime ? ns.read(REQUESTS_FILE).split("\n").filter((line) => line.trim()) : [];
@@ -208,8 +228,14 @@ export async function runCorporationManager(ns) {
     if (!productDivisions.length) waiting("no product division yet");
     else lastWaiting = "";
     let funds = state.corporation.funds;
+    // A new division's first product waits until it has an office in the development city and its set-up requests
+    // (expand, offices, boosts) have run: a new division starts with only Sector-12, and the first product would
+    // otherwise be developed there by a tiny office (slow, low rating).
+    const queued = ns.read(REQUESTS_FILE).split("\n").filter((line) => line.trim()).map((line) => { try { return JSON.parse(line); } catch { return null; } });
     for (const divisionData of productDivisions) {
-      const outcome = await manageProducts(ns, log, state, divisionData, mainCityOf(divisionData, preferredCity), funds, flags, marketTa2Products);
+      const settingUp = queued.some((request) => request?.division === divisionData.name && ["expand", "office", "boosts"].includes(request.type));
+      const firstProductReady = divisionData.cities.includes(preferredCity) && !settingUp;
+      const outcome = await manageProducts(ns, log, state, divisionData, mainCityOf(divisionData, preferredCity), funds, flags, marketTa2Products, firstProductReady);
       funds = outcome.funds;
       if (outcome.acted) acted = true;
     }
@@ -312,6 +338,16 @@ function developmentCityOf(state, divisionName) {
   return division?.makesProducts && division.cities.length ? mainCityOf(division, developmentCity) : null;
 }
 
+/** Waiting reasons already logged, per division (logged once until the reason changes). @type {Map<string, string>} */
+const loggedWaits = new Map();
+
+/** @param {(event: string, details: string) => void} log @param {string} division @param {string} reason */
+function waitingFor(log, division, reason) {
+  if (loggedWaits.get(division) === reason) return;
+  loggedWaits.set(division, reason);
+  log("waiting", `${division}: ${reason}`);
+}
+
 /**
  * The city where a division develops products: the preferred one if it has an office there, else its first city.
  * @param {{cities: CityName[]}} division @param {CityName} preferred
@@ -326,9 +362,10 @@ function mainCityOf(division, preferred) {
  * @param {NS} ns @param {(event: string, details: string) => void} log @param {any} state
  * @param {{name: string, maxProducts: number}} divisionData @param {CityName} mainCity @param {number} funds
  * @param {any} flags @param {Set<string>} marketTa2Products "<division>/<product>" with Market-TA.II on
+ * @param {boolean} firstProductReady false while a division without products lacks its development office or set-up
  * @returns {Promise<{acted: boolean, funds: number}>}
  */
-async function manageProducts(ns, log, state, divisionData, mainCity, funds, flags, marketTa2Products) {
+async function manageProducts(ns, log, state, divisionData, mainCity, funds, flags, marketTa2Products, firstProductReady) {
   const division = divisionData.name;
   let acted = false;
   // Development progress and rating are the same in every city: decide on the main city's entries.
@@ -349,7 +386,10 @@ async function manageProducts(ns, log, state, divisionData, mainCity, funds, fla
       acted = true;
     }
   }
-  if (!products.some((product) => product.developmentProgress < 100)) {
+  const allProducts = (state.products ?? []).filter((/** @type {ProductData} */ product) => product.division === division);
+  if (!allProducts.length && !firstProductReady) {
+    waitingFor(log, division, `first product waits for the ${developmentCity} office and the division's set-up requests`);
+  } else if (!products.some((product) => product.developmentProgress < 100)) {
     if (products.length >= divisionData.maxProducts && finished.length) {
       const worst = finished.reduce((lowest, product) => (product.rating < lowest.rating ? product : lowest));
       await report(ns, log, "discontinue-product", [[division, worst.name]]);

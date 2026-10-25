@@ -6,16 +6,18 @@
 export async function main(ns) {
   const places = /** @type {{division: string, cities: CityName[], names: string[]}[]} */ (JSON.parse(String(ns.args[0])));
   while ((await ns.corporation.nextUpdate()) !== "SALE");
-  const products = places.flatMap(({ division, cities, names }) => cities.flatMap((city) => names.map((name) => {
-    const product = ns.corporation.getProduct(division, city, name);
-    return {
+  // The names were read before the wait: a product discontinued meanwhile (e.g. by the corp manager) is skipped.
+  const products = places.flatMap(({ division, cities, names }) => cities.flatMap((city) => names.flatMap((name) => {
+    let product;
+    try { product = ns.corporation.getProduct(division, city, name); } catch { return []; }
+    return [{
       division, city, name, developmentProgress: product.developmentProgress, rating: product.rating,
       effectiveRating: product.effectiveRating, desiredSellAmount: product.desiredSellAmount,
       desiredSellPrice: product.desiredSellPrice, stored: product.stored, productionAmount: product.productionAmount,
       actualSellAmount: product.actualSellAmount, productionCost: product.productionCost,
       demand: product.demand, competition: product.competition, quality: product.stats.quality,
       designInvestment: product.designInvestment, advertisingInvestment: product.advertisingInvestment,
-    };
+    }];
   })));
   ns.write("data/corp/products.txt", JSON.stringify(products), "w");
 }

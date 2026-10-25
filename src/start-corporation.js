@@ -1,8 +1,8 @@
 const AGENT = "agent.js";
 // Corporation services on home, started in this order. Their worker scripts (11.6 GB readers, 21.6 GB actions) take
 // turns on the remaining RAM (lib/corp-scripts.js). corp/status.js feeds the dashboard; corp/manager.js (~115 GB, reads the API
-// itself) prices from the start, its product work waits until a product division exists.
-const CORPORATION_SERVICES = ["services/corp/status.js", "services/corp/manager.js"];
+// itself) prices from the start; corp/supply.js buys the inputs (instead of the Smart Supply unlock), its product work waits until a product division exists.
+const CORPORATION_SERVICES = ["services/corp/status.js", "services/corp/supply.js", "services/corp/manager.js"];
 // Arguments per service (corp-manager: reinvest a share of the funds every 30 minutes).
 const SERVICE_ARGS = { "services/corp/manager.js": ["--reinvest-minutes", 30] };
 
