@@ -1,8 +1,9 @@
 # bitburner-ai
 
 Experiment: playing Bitburner (Steam, v3.0.1) with Claude writing all the scripts. Fresh save started 2026-10-11.
-Detailed notes (formulas read from the game code, lessons, BitNode history): `docs/notes-archive.md`. Read the part
-for a topic before working on it; it is history, so trust the code and live measurements over it.
+Detailed notes (formulas read from the game code, lessons, BitNode history) are the old CLAUDE.md in git:
+`git show 93b2c83:CLAUDE.md`. Read the part for a topic before working on it; it is history, so trust the code and
+live measurements over it.
 
 ## Goal
 Fastest progress by **real time**. Verify every model/claim by measuring (hacking: `services/hacking/metrics.js` +
@@ -75,7 +76,7 @@ What is there:
 - **General tools**: `tools/backdoor/` (chains, all), `path`, `root`, `kill`, `kill-all`, `usage`, `state`,
   `player-status`, `bitnode-status`, `bootstrap-purchases`.
 
-## Key facts (game code v3.0.1; details and more in docs/notes-archive.md)
+## Key facts (game code v3.0.1; details and more in the old CLAUDE.md, see above)
 - Servers start at 4% of max money: low-growth targets need hours of prep.
 - Company factions: employed + 400k company rep (300k with a backdoor on the company's own server); they keep their
   invite across installs (keepOnInstall), so the grind is once per BitNode.
