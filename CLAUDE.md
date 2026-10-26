@@ -8,13 +8,16 @@ prep the next target in parallel. Verify every model/claim with the metrics samp
 baseline vs change, marks in `marks.txt`) — formulas from memory have been wrong before.
 Lesson: every server starts at 4% of max money; low-growth targets need hours of prep (sigma-cosmetics ~5 h), n00dles ~1 min.
 
-## Status (2026-10-25): BitNode 5 started (SF1.1, SF3.3, SF4.1; home 512 GB)
+## Status (2026-10-26): BitNode 5 (SF1.1, SF3.3, SF4.1; home 512 GB)
 - BN5 multipliers (read live with `tools/bitnode-status.js`): ScriptHackMoney 0.15 but ServerMaxMoney 1 (BN4 0.1125,
   so hacking pays ~6.7x BN4), ServerStartingMoney 0.5, ServerStartingSecurity 2, HackExpGain 0.5, InfiltrationMoney/Rep
   1.5, CrimeMoney 0.5, AugmentationMoneyCost 2, CorporationValuation 0.75, CorporationDivisions 0.75,
   WorldDaemonDifficulty 1.5 = hacking 4500. No corp softcap penalty. SF3.3: Office/Warehouse API free. Reward SF5 =
   Intelligence, permanent Formulas.exe, getBitNodeMultipliers, hacking mults +8%.
 - BN5 start: money from infiltration (VitaLife ~$9m/s at 75% demand) + hacking ~$3m/s until $150b for the corporation.
+- Now (2026-10-26): corporation "organa" is public, funds ~1e88, revenue ~1.7e85/s; divisions agri (Agriculture),
+  grenga (Chemical), ama (Tobacco), norad (Pharmaceutical), all in 6 cities. Money is no constraint; next: farm
+  augmentations (company factions via company work, bribes), Intelligence farm before `w0r1d_d43m0n` (hacking 4500).
 - BitNode order after BN5 (user, 2026-10-25): BN10.1 (sleeves) -> BN2 (gangs) -> BN4.2/4.3 (Singularity RAM x4/x1)
   -> maybe BN10.2/10.3 later (only +1 sleeve each). Game code: SF10 = 1 sleeve per level; The Covenant sells 5 more,
   only while in BN10, $10t x 10^n each (~$111q for all five); memory upgrades also only in BN10 -> buy everything before
@@ -23,12 +26,12 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   HackingLevelMultiplier 0.8, WorldDaemonDifficulty 5 (= hacking 15000: the long pole); SF2 = gangs elsewhere at -54k karma.
   Unchecked: gang without karma inside BN2, Covenant sleeves kept across BitNodes, Covenant invite requirements.
 
-## Status (2026-10-16): BitNode 3 done, BitNode 4 next
+## History: BitNode 3 and 4 (2026-10-13 to 2026-10-25; BN4 done = SF4.1)
 - BN3 result (2 days): corporation profit $2.7M/s -> ~$1.8e28/s, personal money ~1e49 (dividends + shares), all
   augmentations via corporation bribes ($1b corp funds per faction rep point) and company work (8k company rep/s with
   the late multipliers: 300k invite in < 40 s with the company server backdoored). Endgame lever: NeuroFlux levels via
   bribes for the hacking level `w0r1d_d43m0n` needs (3000 x WorldDaemonDifficulty).
-- BN4 plan (multipliers from the game code): no corporation penalties (same as BN3), ScriptHackMoney 0.2, HackExpGain 0.4,
+- BN4 (multipliers from the game code; the start recipe below was used again in BN5): no corporation penalties (same as BN3), ScriptHackMoney 0.2, HackExpGain 0.4,
   gym/company/faction work exp 0.5, FactionWorkRepGain 0.75, WorldDaemonDifficulty 3 = hacking 9000. Reward SF4 =
   Singularity API (RAM x16 at SF4.1, x4 at 4.2, x1 at 4.3): automate factions, augmentation buying, installs, work.
   Start: `run start.js` (hacking) until $150b personal money -> create the corporation self-funded (seed money is BN3
@@ -47,7 +50,7 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   game's favor preview). The loop that works: earn rep until the preview shows 150, install (any cheap aug, e.g. 7.5k
   rep from a city faction; NeuroFlux is too expensive by now), then donate. The dashboard's favor panel tracks it.
 - Every install costs ~20-30 min of reduced income while the big targets are re-prepped from 4% money, plus Formulas.exe
-  ($5b) and DarkscapeNavigator.exe must be rebought (the darknet service waits for it); TIX/4S access survives.
+  ($5b; not with SF5) and DarkscapeNavigator.exe must be rebought (the darknet service waits for it); TIX/4S access survives.
 - Next: Daedalus (30 augs + $100b met; needs hacking 2500 -> NeuroFlux/augs bought via Bachman donations), 150 favor
   there, donate ~$1t for The Red Pill (2.5M rep), backdoor w0r1d_d43m0n. Then BitNode plan: BN3 once (SF3.1 is enough:
   level 3 only saves the $50b Office API + $50b Warehouse API unlocks per corp), BN4 three times (Singularity RAM
@@ -67,6 +70,15 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   averages 10 cycles -> buy everything in one go, then wait ~10 cycles before accepting. Bonus time runs the corp ~10x.
   Round 1 $73b, round 2 $1.5t accepted (2026-10-14; player keeps 550M of 1.5e9 shares). Divisions: "food" (Agriculture),
   "FSAB" (Chemical), "tobacco" (Tobacco, main office Aevum 30+, 5 support offices mostly R&D).
+  Lesson (BN5, 2026-10-25): one supplier with two importers of the same material: exports run in list order and the
+  guide amount (IPROD+IINV/10)*(-1) lets the first importer take everything; the second buys at quality 1 and its output
+  quality drops to sqrt(potential) (input quality = unweighted mean of the inputs, game code). Pharmaceutical "norad" got
+  0 Chemicals behind Agriculture (Drugs quality 19). User's rule: exports stay need-based (shares of EPROD cram the
+  warehouses); scale the supplier to demand instead, a mild surplus is sold. The manager now does that every round
+  (`starvedSuppliers`: an exporter that sells < 5% of its output and keeps < 1 s of it in stock grows by 3% office + 3%
+  boosts of funds, then waits 3 min). One step took grenga from ~1070 to ~2750 Chemicals/s per city: both importers
+  fully supplied, ~10-20% surplus sold, norad Drugs quality ~1150 (Aevum ~3100). Judging "starved" by importer imports
+  vs consumption does not work: the IINV/10 term keeps imports below consumption while the importer holds stock.
   Lessons: Smart Supply option for imported materials must be "leftovers" ("imports" ignores the stock: imports piled
   up, the warehouses filled and Agriculture production fell to 40%). Research only when it costs < half the RP pool;
   RP per office = 0.004 x sqrt(R&D output) -> Project Insight (linear) beats more R&D staff. Product effective rating =
@@ -86,7 +98,6 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   "Some common passwords include …" (word lists), "Remember this password: 71", and tips (NIL = "you are one who's'nt
   authorized" probably gives partial feedback, but authenticate only answers 401 → look at heartbleed logs).
   AccountsManager 0-100 got 503 Service Unavailable partway through 100 tries (rate limit or server offline?).
-  `services/darknet-crawler.js` is an older unfinished draft (truncated, fails tsc).
 - Company factions (read from the game code, v3.0.1, main.bundle.js): invite = employed at the company + 400k company rep
   (CorpFactionRepRequirement), x0.75 = 300k with a backdoor on the company's own server (Fulcrum Technologies -> fulcrumtech,
   not fulcrumassets). Fulcrum Secret Technologies also needs a backdoor on fulcrumassets. All company factions keep
@@ -94,22 +105,24 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 - Infiltration (2026-10-16): `services/infiltration-solver.js` (1.6 GB) solves all 8 mini-games. The game only checks `isTrusted && instanceof
   KeyboardEvent` in its document keydown listener (failure = automated = hospital); the solver skips it: it finds the infiltration object
   via the React fiber `memoizedProps.state` of any h4 and calls `stage.onKey({key,...})` directly. Verified offline against the real stage
-  classes from main.bundle.js (12800 runs, 0 failures); the fiber lookup is untested live. Start button is only pressed below
+  classes from main.bundle.js (12800 runs, 0 failures); the fiber lookup works live (2026-10-17). Start button is only pressed below
   `--max-difficulty` (3; at >= 3.5 the game kills you). `tools/infiltrations.js` lists targets by money/rep per difficulty.
   `services/infiltration-autopilot.js` (24.6 GB) runs the whole loop: best reward/s target (API reward includes the market demand), travel, `goToLocation`,
   presses Infiltrate Company by calling the button handler with `{isTrusted:true}`, solves (shared `lib/infiltration-minigames.js`), then trades for
   `--faction` rep (React Select onChange + Trade button) or sells (`--money-floor`), hospital below 70% hp; `--stop-at-money <n>` ends it between runs.
   Market demand is ONE global value (game code `InfiltrationState`), not per company: alternating targets does not help. Tested live 2026-10-17: 1 full run, 20 levels in ~32 s.
   Starting it while a success screen is open pays that infiltration out immediately.
-- Combat stats (2026-10-17): `services/gym-trainer.js` (7.6 GB, Singularity) trains, since 2026-10-25, the combat stat with the most levels per
+- Combat stats (2026-10-17): `services/gym-trainer.js` (94.1 GB at SF4.1, Singularity) trains, since 2026-10-25, the combat stat with the most levels per
   exp (multiplier read back from level + exp; infiltration difficulty = base - (str+def+dex+agi+cha)^0.9 / 250 - int / 1600, game
-  code), `--order lowest` = lowest first (The Syndicate's 200 each) in the gym of the city you are in (Sector-12
+  code); `services/gym-trainer-lowest-stat.js` trains the lowest first (faction requirements on every stat, e.g. The
+  Syndicate's 200 each; `--target 200` stops there). Shared loop in `lib/gym-training.js`; both take `--order`. In the gym of the city you are in (Sector-12
   Powerhouse x10 exp, Aevum Snap x5, Volhaven Millenium x4; never travels unless `--travel`/`--gym`), unfocused by default (`--foreground` = x1.25
   exp). `tools/stat-eta.js` = time to level N (default 200 = The Syndicate); `tools/combat-augmentations.js` = unowned combat augs of your
   factions. Level = floor(mult x (32 ln(exp+534.5) - 200)): level multipliers cut the needed exp exponentially (agility x1.66 was the bottleneck).
   Infiltration payout depends on the target, not your stats (money ~ security^3), and on market demand (1 - 0.001 floors^2, floors decay ~35 s
   half-life, added per run = max level); stats only unlock targets (difficulty < 3.5).
-- Ideas not started: install helper (aug order/cost/timing from a pasted faction list).
+- Augmentation rounds (2026-10-25/26): `run tools/buy-augmentations.js`, then `run tools/install-augmentations.js
+  [--then start-corporation.js]` (Singularity; both give Intelligence XP, see Layout).
 - Stock traders (2026-10-12): `services/stock-trader-4s.js` (4S forecast; buy >= 0.6 ranked by (forecast-0.5)*volatility,
   sell < 0.55; 19.75 GB) and `services/stock-trader.js` (no 4S: forecast estimated from 50 ticks, buy >= 0.65, sell < 0.5,
   quick sell at <= 2 of the last 10 ticks up; 14.75 GB). Shared code `lib/stock-trading.js`, log data/stocks.txt. Run one,
@@ -117,7 +130,8 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   (~6 s of late-BN1 hacking income); meant for BitNode 8. The 20-tick first version churned (bought noise, lost the spread);
   the 50-tick version is computed, not yet tested live. Aug installs liquidate positions; TIX/4S access survives them.
 - HWGW batcher (2026-10-11, Formulas.exe bought): ~110M $/s with the controller -> ~19B $/s within 11 min (mark `batcher-start`),
-  0 desyncs / 0 cancelled batches in 40k; XP ~80x. Formulas.exe is lost on install: rebuy it ($5b at the darknet market) each round.
+  0 desyncs / 0 cancelled batches in 40k; XP ~80x. Formulas.exe was lost on install before SF5 (rebuy $5b at the darknet market); in BN5 and with SF5 the game hands
+  it out on every install (Prestige.ts).
   Open: planned targets far from max money (rho-construction 4%) wait for prep RAM while batches hold their reserve.
 
 ## Setup
@@ -126,9 +140,10 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 - Live dashboard: http://127.0.0.1:12526/dashboard (served by the bridge; `bridge/dashboard.html` + `bridge/dashboard-data.mjs`
   read data/metrics.txt, state.txt, darknet.txt, coding-contracts.txt; refresh 5 s). Open the URL, not the file.
 - `node bridge/cli.mjs …` — talks to the bridge (control port 12526): `status | sync | ls | get <file> | ram <file>… | run <script> [-h host] [-t N] [args] | call <method> [json]`.
-- After every reset (augmentation install or new BitNode) the user types `run start.js`: it roots, starts the hacking service on the biggest rooted server (`services/hacking/batcher.js` with Formulas.exe, else `services/hacking/controller.js`; the controller runs start.js itself once Formulas.exe appears, and start.js kills it), metrics if home has room, then spawns `agent.js` (fits an 8 GB home). `agent.js` must be running on home. It executes `cli run` commands; for remote hosts it scp's all `.js` first.
-- In corporation BitNodes use `run start-corporation.js` instead: services/corp/status.js + services/corp/manager.js +
-  agent.js only, no hacking or hacking-economy home services (corp calls cost 10-20 GB each; services/corp/manager.js needs ~115 GB + 21.6 GB). start.js
+- After every reset (augmentation install or new BitNode) the user types `run start.js` (or `tools/install-augmentations.js
+  --then <script>` starts it after the install): it roots, starts the hacking service on the biggest rooted server (`services/hacking/batcher.js` with Formulas.exe, else `services/hacking/controller.js`; the controller runs start.js itself once Formulas.exe appears, and start.js kills it), metrics if home has room, then spawns `agent.js` (fits an 8 GB home). `agent.js` must be running on home. It executes `cli run` commands; for remote hosts it scp's all `.js` first.
+- In corporation BitNodes use `run start-corporation.js [--reinvest-minutes 30]` instead (5.1 GB): services/corp/status.js +
+  services/corp/supply.js + services/corp/manager.js + agent.js only, no hacking or hacking-economy home services (corp calls cost 10-20 GB each; services/corp/manager.js needs ~115 GB + 21.6 GB). start.js
   would start those again. Corp scripts: one corporation function per worker script (`workers/corp/read-*.js` 11.6 GB,
   `workers/corp/do-<action>.js` 21.6 GB, taking a JSON list of calls), run one at a time via `lib/corp-scripts.js`
   (waits for free RAM). services/corp/manager.js: products (develop, discontinue the worst, sell), custom Market-TA.II pricing (since 2026-10-18 the game's TA2 formula in `lib/corp-market.js` when the Demand + Competition unlocks are bought: price = MP + markupLimit x sqrt(potential / units to sell), potential = quality factor x demand x (100-competition)/100 x business x SalesBots x advertising; product markup = median of the last 18 measurements (cycles that left stock), raised x1.5 per call after ~2 sold-out cycles until stock is left again (2026-10-25: one bad measurement had priced madig ~1000x too low), formula estimate x overshoot until the first measurement; without the two unlocks the manager sets no prices at all, detected for free from demand/competition being undefined, hasUnlock would cost 10 GB)
@@ -205,7 +220,7 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
 ## Layout (`src/`, synced to home)
 - `start.js`, `start-corporation.js`, `agent.js` — top level because the user types them by hand.
 - Structure rule (user, 2026-10-23/24; keep it when adding scripts): themes are `hacking`, `corp`, `darknet`, `coding-contracts`,
-  `backdoor` (add a new theme folder rather than a new prefix). Inside a theme folder the file name drops the theme prefix
+  `backdoor`, `intelligence` (add a new theme folder rather than a new prefix). Inside a theme folder the file name drops the theme prefix
   (`tools/corp/office.js`, not `tools/corp/corp-office.js`); role prefixes like `read-`/`do-`/`batch-` stay.
   - `services/` long-running. Top level = only services the user starts by hand; services started by start.js /
     start-corporation.js (or other scripts) go into `services/<theme>/`.
@@ -214,22 +229,31 @@ Lesson: every server starts at 4% of max money; low-growth targets need hours of
   - `lib/` shared code (flat, prefixed `corp-*.js` etc.; not part of the rule so far).
 - `services/` top level: `server-buyer.js` (ns.cloud servers; not started by start.js since 2026-10-16: money is needed elsewhere
   in BN4; buys only after TOR + BruteSSH..HTTPWorm are owned and when <10% thread slots are free), `stock-trader.js`,
-  `stock-trader-4s.js`, `infiltration-solver.js`, `infiltration-autopilot.js`, `gym-trainer.js`, `crime.js`, `corp-startup.js`,
+  `stock-trader-4s.js`, `infiltration-solver.js`, `infiltration-autopilot.js`, `gym-trainer.js`, `gym-trainer-lowest-stat.js`, `crime.js`, `corp-startup.js`,
   `corp-upkeep.js`. `services/hacking/` = `controller.js` or, with Formulas.exe, `batcher.js` (HWGW batches; planner in
   `lib/batch-planner.js`, log data/batcher.txt) on a rooted server, `metrics.js` on home; `services/coding-contracts/solver.js`;
   `services/darknet/orchestrator.js`; `services/corp/` = `status.js` (corp state every 20 s -> data/corp-state.txt +
   data/corp-history.txt for the dashboard), `manager.js`, `supply.js`, `growth.js` (stub).
-- `tools/` top level: `root`, `path` (backdoor connect chain), `kill`, `kill-all` (every script on every reachable server;
+- `tools/` top level: `bitnode-status` (BitNode, source files, multipliers -> data/bitnode-status.txt), `root`, `path` (backdoor connect chain), `kill`, `kill-all` (every script on every reachable server;
   `--keep-agent`), `state`, `usage` (RAM and scripts per server + threads per target), `player-status`, `bootstrap-purchases`,
   `stat-eta`, `combat-augmentations`, `buy-augmentations` (Singularity: all affordable augmentations of your factions, most
-  expensive first, prerequisites first, then NeuroFlux to the max; `--dry-run`, `--keep <$>`, `--no-neuroflux`), `infiltrations`. `tools/backdoor/` = `chains` (paste-ready chain for every server still
+  expensive first, prerequisites first, then NeuroFlux to the max; `--dry-run`, `--keep <$>`, `--no-neuroflux`),
+  `install-augmentations` (Singularity install = +15 Intelligence XP, the Install button gives none; the game starts
+  `--then <script>` after the reset, default start.js, no args; 81.7 GB), `infiltrations`.
+  Intelligence XP (game code v3.0.1, raw: no augmentation multiplies it): joinFaction 7.5, purchaseAugmentation and
+  installAugmentations 15 each, terminal `hack` 4 x log10(hack exp) per success, BitNode destruction 300. Fastest farm:
+  join keepOnInstall factions (megacorps, Fulcrum Secret, Shadows of Anarchy) + softReset(self) loop =
+  `tools/intelligence/farm.js` (5 GB; `--target-intelligence`, `--hours` 8, `--then` start.js, `--yes`; stop early with
+  data/intelligence-farm-stop.txt) -> `workers/intelligence/join-and-reset.js` (132.2 GB; settings
+  data/intelligence-farm.json, log data/intelligence-farm.txt, constants `lib/intelligence-farm.js`). Every reset wipes
+  money/stats/other factions: run it right after an install. Cycle rate not measured yet. `tools/backdoor/` = `chains` (paste-ready chain for every server still
   missing a backdoor, faction + company servers first; `--important`), `all`; `tools/corp/` = request tools (add-division,
   adverts, boosts, expand, exports, limit-production, office, upgrades); `tools/darknet/` = `map`, `crack`;
   `tools/hacking/` = `batch-plan` (batcher preview), `check-grow`, `debug-hack-plan`; `tools/coding-contracts/` =
   `describe-type`, `test-solvers`.
 - `workers/hacking/` = `hack`, `grow`, `weaken`, `share` (controller; batcher uses `share` too), `batch-hack`, `batch-grow`,
   `batch-weaken` (batcher, take an absolute landing time); `workers/corp/` = `read-<call>.js` (11.6 GB) and `do-<action>.js`
-  (21.6 GB), one corporation function each, names built in `lib/corp-scripts.js`; `workers/darknet/` = `crawl`, `phish`.
+  (21.6 GB), one corporation function each, names built in `lib/corp-scripts.js`; `workers/darknet/` = `crawl`, `phish`; `workers/intelligence/` = `join-and-reset`.
 - Coding contracts: `lib/contract-solvers.js` (all 30 types; `tools/coding-contracts/describe-type.js` fetches the game's description for a type). Verify with `tools/coding-contracts/test-solvers.js` (dummy contracts, results in data/contract-solver-test-results.txt) before trusting changes; `services/coding-contracts/solver.js` on home only attempts verified types and blocks a type after one real failure. Log: data/coding-contracts.txt (readable lines via lib/log.js; logs the user reads are text, logs only scripts read stay JSON). First run: 10 solved, ~5k CyberSec rep + $50M.
 - Start the hacking service: `node bridge/cli.mjs run start.js [--rep <share fraction>]` (restart: `tools/kill.js <host> services/hacking/batcher.js` first; a new batcher adopts in-flight batches by their landing times).
 - Use meaningful names (user rule, see ~/.claude/CLAUDE.md).

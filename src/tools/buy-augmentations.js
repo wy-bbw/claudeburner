@@ -2,7 +2,8 @@ const NEUROFLUX = "NeuroFlux Governor";
 /** @typedef {ReturnType<NS["getPlayer"]>["factions"][number]} FactionName */
 
 // buy-augmentations.js (home, Singularity API): buys every augmentation you can afford from the factions you are a member
-// of, then NeuroFlux Governor levels until money or faction rep runs out. Install afterwards by hand.
+// of, then NeuroFlux Governor levels until money or faction rep runs out. Install afterwards with
+// tools/install-augmentations.js (+15 Intelligence XP over the Install button). Each purchase gives 15 Intelligence XP too.
 // Order: each purchase raises the price of every later one (x1.9 per augmentation), so the most expensive affordable
 // augmentation goes first; an augmentation waits until its prerequisites are owned or bought. Each augmentation is bought
 // from the member faction with the most rep. NeuroFlux comes last because its price and rep requirement grow per level.

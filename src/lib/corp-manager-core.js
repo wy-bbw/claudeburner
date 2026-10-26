@@ -36,6 +36,11 @@ let developmentCity = "Aevum";
 const ALL_CITIES = /** @type {CityName[]} */ (["Sector-12", "Aevum", "Chongqing", "New Tokyo", "Ishima", "Volhaven"]);
 // The corporation guide's export amount: exactly what the importer will use next cycle, minus what it still has.
 const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
+// A supplier counts as starved when it sells less than this share of its production (the rest went to its importers).
+const SUPPLIER_LEFTOVER = 0.05;
+// Starved suppliers grow by one step (office + boosts, each this share of funds), then wait so the step shows in production.
+const SUPPLIER_GROWTH_FRACTION = 0.03;
+const SUPPLIER_GROWTH_PAUSE_MS = 3 * 60_000;
 
 /**
  * @typedef {{division: string, city: CityName, name: string, developmentProgress: number, rating: number,
@@ -75,7 +80,8 @@ const EXPORT_AMOUNT = "(IPROD+IINV/10)*(-1)";
 //   tools/corp/add-division.js (all set-up steps for a new division in one go).
 // --reinvest-minutes N (default 5, 0 = off) queues upgrades (20% of funds), main office (15%), all offices (10%) and boosts
 // (10%) of every product division every N minutes, plus 5% offices + 5% boosts for suppliers that cannot feed their importers
-// (each request spends its share of the funds when it runs).
+// (each request spends its share of the funds when it runs). Between those rounds a supplier whose exports take everything it
+// makes (nothing left to sell) grows by 3% offices + 3% boosts every 3 minutes until a surplus is left (sold at MP).
 // --upkeep-and-prices-only: only tea/parties, prices and requests queued by hand (no products, Wilson/Advert or
 // reinvestment; for running the corporation by hand).
 // --mode maintain|grow (default maintain, for a mature company): R&D share of every office, 50% (research first) or 20%
@@ -106,6 +112,8 @@ export async function runCorporationManager(ns) {
   /** @type {Map<string, {calibrated?: boolean}>} pricing memory per item and city */
   const priceMemory = new Map();
   let lastPricingNote = "";
+  /** @type {Map<string, number>} supplier division -> time of its last growth step (reinvest or starved-supplier step) */
+  const lastSupplierGrowth = new Map();
   let lastStateTime = 0, lastPriceChange = 0, lastRequestTime = 0, lastReinvest = Date.now() - Math.max(0, Number(flags["reinvest-minutes"]) * 60_000 - FIRST_REINVEST_DELAY_MS), lastWaiting = "";
   const log = (/** @type {string} */ event, /** @type {string} */ details) => appendLog(ns, LOG_FILE, event, details);
   const waiting = (/** @type {string} */ reason) => {
@@ -133,7 +141,7 @@ export async function runCorporationManager(ns) {
       const quality = suppliersFor(state, limited);
       for (const consumer of limited) log("quality", `${consumer.division} ${consumer.city}: ${consumer.reason} -> grow the suppliers of ${consumer.inputs.join(", ")}`);
       if (quality.unsupplied.length) log("quality", `no supplier division for ${quality.unsupplied.join("; ")} (bought at quality 1)`);
-      const suppliers = [...new Set([...starvedSuppliers(state), ...quality.suppliers])].filter((name) => !growing.some((entry) => entry.name === name));
+      const suppliers = [...new Set([...starvedSuppliers(state).map((entry) => entry.division), ...quality.suppliers])].filter((name) => !growing.some((entry) => entry.name === name));
       // Every other division (budget 0: no growth) is reassigned too, so the R&D share holds everywhere in every round.
       const covered = new Set([...growing.map((entry) => entry.name), ...suppliers]);
       const reassigned = state.divisions.filter((/** @type {{name: string}} */ entry) => !covered.has(entry.name));
@@ -152,6 +160,24 @@ export async function runCorporationManager(ns) {
       ];
       ns.write(REQUESTS_FILE, reinvest.map((request) => JSON.stringify(request) + "\n").join(""), "a");
       log("reinvest", `queued upgrades 20%; main office 15%, all offices 10%, boosts 10% of funds split over ${growing.map((entry) => entry.name).join(", ") || "no product division"}; suppliers (starved or quality-limited consumers, 5% + 5%): ${suppliers.join(", ") || "none"}`);
+      for (const name of suppliers) lastSupplierGrowth.set(name, Date.now());
+    }
+
+    // Scale suppliers to demand between reinvest rounds: a supplier whose exports take all it makes grows one step (office +
+    // boosts) and waits SUPPLIER_GROWTH_PAUSE_MS for the effect, until some of its output is left to sell.
+    if (!flags["upkeep-and-prices-only"] && !ns.read(REQUESTS_FILE).trim()) {
+      const due = starvedSuppliers(state).filter((entry) => Date.now() - (lastSupplierGrowth.get(entry.division) ?? 0) > SUPPLIER_GROWTH_PAUSE_MS);
+      const divisions = [...new Set(due.map((entry) => entry.division))];
+      if (divisions.length) {
+        const time = Date.now();
+        ns.write(REQUESTS_FILE, divisions.flatMap((name) => [
+          { type: "office", division: name, city: "all", size: 0, budgetFraction: SUPPLIER_GROWTH_FRACTION, jobs: null, time },
+          { type: "boosts", division: name, budgetFraction: SUPPLIER_GROWTH_FRACTION, fill: BOOST_FILL, time },
+        ]).map((request) => JSON.stringify(request) + "\n").join(""), "a");
+        for (const name of divisions) lastSupplierGrowth.set(name, time);
+        log("supply", `${due.map((entry) => `${entry.division} exports all its ${entry.material} (${(entry.produced / entry.cities).toFixed(0)}/s per city in ${entry.cities} cities, nothing left to sell)`).join("; ")}`
+          + ` -> office + boosts ${SUPPLIER_GROWTH_FRACTION * 100}% of funds each`);
+      }
     }
 
     // Offices with unassigned employees or more interns than the 1/9 they need (HRBuddy research hires every cycle, as
@@ -278,29 +304,29 @@ export async function runCorporationManager(ns) {
 }
 
 /**
- * Suppliers that cannot feed their importers: for every export route (exporter row -> importer row of the same material)
- * the importer consumes more than it imports (productionAmount < 0 is consumption), so it buys the rest on the market
- * (Smart Supply) or runs short. Those exporter divisions need bigger offices and warehouses.
+ * Suppliers that cannot feed their importers: an exporting material row whose exports took (nearly) all of its production,
+ * so nothing was left to sell or keep (less than SUPPLIER_LEFTOVER of the production sold, less than one second of production
+ * in stock). The export amounts are need-based ((IPROD+IINV/10)*(-1)), so the importers wanted at least that much and buy
+ * the rest on the market at quality 1. Judged on the exporter's side: an importer with stock imports less than it consumes
+ * by design (the IINV/10 term), so comparing imports with consumption would grow the supplier forever.
  * @param {any} state
- * @returns {string[]} names of the divisions to grow
+ * @returns {{division: string, material: string, produced: number, cities: number}[]} one entry per starved division and material
  */
 function starvedSuppliers(state) {
-  /** @type {{division: string, city: string, name: string, productionAmount: number, importAmount?: number, exports?: {division: string, city: string}[]}[]} */
+  /** @type {{division: string, city: string, name: string, productionAmount: number, actualSellAmount?: number, stored: number, exports?: unknown[]}[]} */
   const materials = state.materials ?? [];
-  /** @type {Map<string, {wanted: number, imported: number}>} per exporter division and importer division */
-  const routes = new Map();
-  for (const exporter of materials) {
-    for (const target of exporter.exports ?? []) {
-      const importer = materials.find((row) => row.division === target.division && row.city === target.city && row.name === exporter.name);
-      if (!importer) continue;
-      const key = `${exporter.division}>${target.division}`;
-      const route = routes.get(key) ?? { wanted: 0, imported: 0 };
-      route.wanted += Math.max(0, -importer.productionAmount);
-      route.imported += importer.importAmount ?? 0;
-      routes.set(key, route);
-    }
+  /** @type {Map<string, {division: string, material: string, produced: number, cities: number}>} */
+  const starved = new Map();
+  for (const row of materials) {
+    if (!row.exports?.length || row.productionAmount <= 0) continue;
+    if ((row.actualSellAmount ?? 0) >= SUPPLIER_LEFTOVER * row.productionAmount || row.stored >= row.productionAmount) continue;
+    const key = `${row.division}/${row.name}`;
+    const entry = starved.get(key) ?? { division: row.division, material: row.name, produced: 0, cities: 0 };
+    entry.produced += row.productionAmount;
+    entry.cities++;
+    starved.set(key, entry);
   }
-  return [...new Set([...routes].filter(([, route]) => route.wanted > 0 && route.imported < 0.9 * route.wanted).map(([key]) => key.split(">")[0]))];
+  return [...starved.values()];
 }
 
 /**
