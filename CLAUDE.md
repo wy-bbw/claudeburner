@@ -11,12 +11,12 @@ Fastest progress by **real time**. Verify every model/claim by measuring (hackin
 wrong: read them in the game source (github bitburner-official/bitburner-src, branch `stable` = v3.0.1).
 `~/develop/bitburner/bitburner` is an old v1.3.0 checkout: do not use it.
 
-## Status (2026-10-26)
-- BitNode 5, SF1.1 SF3.3 SF4.1 (Singularity RAM x16), home 512 GB. Multipliers: `run tools/bitnode-status.js`.
-- Corporation "organa" is public, funds ~1e88; divisions agri (Agriculture), grenga (Chemical), ama (Tobacco),
-  norad (Pharmaceutical). Money is no constraint.
-- Next: augmentations (company factions via company work, bribes), Intelligence farm, then `w0r1d_d43m0n` (hacking 4500).
-- BitNode order after BN5 (user): BN10.1 (sleeves: buy all Covenant sleeves and memory before leaving) -> BN2 (gangs)
+## Status (2026-10-30)
+- BitNode 9 (Hacktocracy), SF1.1 SF3.3 SF4.1 SF5.1, home 32 GB. Hacking money x0.001 (max money 0.01, script hack
+  money 0.1), hack exp x0.05, no cloud servers, home RAM cost x5. Multipliers: `run tools/bitnode-status.js`.
+- Plan (user): hacknet hashes -> $150b to found the corporation (no seed money outside BN3), then hashes into corp
+  funds/research. start.js still runs (hacking for exp).
+- BitNode order after BN9 (user): BN10.1 (sleeves: buy all Covenant sleeves and memory before leaving) -> BN2 (gangs)
   -> BN4.2/4.3 -> maybe BN10.2/10.3.
 
 ## Setup
@@ -27,7 +27,8 @@ wrong: read them in the game source (github bitburner-official/bitburner-src, br
   (`run` needs `agent.js` running on home).
 - Node is at `C:\Program Files\nodejs`: prepend it to PATH in shells started before the install.
 - After every reset: `run start.js` (hacking BitNodes: hacking service, darknet, contracts, agent) or
-  `run start-corporation.js` (corporation BitNodes: corp services + agent, no hacking). `tools/install-augmentations.js
+  `run start-corporation.js` (corporation BitNodes: corp services + agent, no hacking); `run start-hacknet.js` in
+  addition starts the hacknet manager. `tools/install-augmentations.js
   --then <script>` starts it by itself after the install.
 
 ## Conventions
@@ -43,12 +44,12 @@ wrong: read them in the game source (github bitburner-official/bitburner-src, br
 - Meaningful names (see ~/.claude/CLAUDE.md).
 
 ## Layout (`src/`, synced to home)
-Structure rule (user): themes `hacking`, `corp`, `darknet`, `coding-contracts`, `backdoor`, `intelligence` (new theme =
+Structure rule (user): themes `hacking`, `hacknet`, `corp`, `darknet`, `coding-contracts`, `backdoor`, `intelligence` (new theme =
 new folder, not a prefix). `services/` long-running: top level only what the user starts by hand, services started by
 other scripts in `services/<theme>/`. `tools/` one-shots run by hand: general ones top level, theme ones in
 `tools/<theme>/`. `workers/<theme>/` single operations started by other scripts. `lib/` shared code (flat, prefixed).
 Inside a theme folder the file name drops the theme prefix; role prefixes (`read-`, `do-`, `batch-`) stay.
-`start.js`, `start-corporation.js` and `agent.js` stay top level because the user types them.
+`start.js`, `start-corporation.js`, `start-hacknet.js` and `agent.js` stay top level because the user types them.
 
 What is there:
 - **Hacking**: `services/hacking/batcher.js` (HWGW batches with Formulas.exe; planner `lib/batch-planner.js`, log
@@ -59,6 +60,9 @@ What is there:
   Supply); `services/corp-startup.js` (startup phases, dry run unless `--go`; walkthrough `docs/corp-phase-2.md`),
   `services/corp-upkeep.js`; `tools/corp/` request tools (queued in data/corp-requests.txt, run by the manager):
   add-division, adverts, boosts, expand, exports, limit-production, office, upgrades.
+- **Hacknet**: `services/hacknet/manager.js` (started by `start-hacknet.js`; servers or nodes, buys the upgrade with
+  the most production per dollar within a payback time, spends hashes on money or corp funds/research; log
+  data/hacknet.txt). Hacking scripts never use hacknet servers (`isHacknetServer` in lib/net.js).
 - **Augmentations and stats** (Singularity): `tools/buy-augmentations.js`, `tools/install-augmentations.js`,
   `tools/combat-augmentations.js`, `services/gym-trainer.js` and `gym-trainer-lowest-stat.js` (`lib/gym-training.js`),
   `tools/stat-eta.js`, `services/crime.js`.
