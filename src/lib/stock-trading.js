@@ -51,8 +51,19 @@ export function buyInOrder(ns, candidates, budget) {
   }
 }
 
+/** What the open positions cost (shares x average price, without commissions). @param {NS} ns @param {string[]} symbols */
+export function investedAtCost(ns, symbols) {
+  let cost = 0;
+  for (const symbol of symbols) {
+    const [shares, averagePrice] = ns.stock.getPosition(symbol);
+    cost += shares * averagePrice;
+  }
+  return cost;
+}
+
 /**
- * One summary line: positions, their value at the current price, and the profit sold since the trader started.
+ * One summary line: positions, their value at the current price, the profit not yet sold (value - cost), the profit
+ * sold since the trader started, and both together.
  * @param {NS} ns @param {string[]} symbols @param {number} realisedProfit
  */
 export function logSummary(ns, symbols, realisedProfit) {
@@ -63,6 +74,8 @@ export function logSummary(ns, symbols, realisedProfit) {
     positions++;
     value += shares * ns.stock.getPrice(symbol);
   }
+  const unrealisedProfit = value - investedAtCost(ns, symbols);
   appendLog(ns, STOCK_LOG, "summary", `${positions} positions worth $${ns.format.number(value)}, `
-    + `realised profit $${ns.format.number(realisedProfit)} since start`);
+    + `unrealised $${ns.format.number(unrealisedProfit)}, realised $${ns.format.number(realisedProfit)}, `
+    + `total $${ns.format.number(unrealisedProfit + realisedProfit)} since start`);
 }

@@ -1,3 +1,4 @@
+import { reservedCash } from "lib/cash-reserve.js";
 import { appendLog } from "lib/log.js";
 
 const LOG_FILE = "data/hacknet.txt";
@@ -14,7 +15,8 @@ const SPEND_MODES = ["auto", "money", "corporation-funds", "corporation-research
 // Hacknet manager for any BitNode: hacknet servers (BitNode 9 or SF9, they make hashes) or hacknet nodes (they
 // make money directly).
 //   - buys the upgrade (level, RAM, cores, new server/node) with the most production per dollar, as long as it
-//     pays back within --payback-hours and leaves --reserve; hashes are valued at their Sell for Money price.
+//     pays back within --payback-hours and leaves --reserve plus the cash other scripts reserved
+//     (lib/cash-reserve.js, e.g. the stock trader's capital); hashes are valued at their Sell for Money price.
 //     A new server counts together with its cheap first upgrades (newServerBundle, needs Formulas.exe).
 //     Simulated time to $150b in BN9 (2026-10-30): at the start 24 h was best (12 h ~46 h, 24 h ~40 h, 48 h ~45 h);
 //     after the hacknet augmentations, with $142m/min of infiltration, 12 h (6 h 8.8 h, 12 h 9.1 h, 24 h 11.7 h, but
@@ -51,17 +53,18 @@ export async function main(ns) {
   while (true) {
     const hasCorporation = ns.corporation.hasCorporation();
     const mode = spend !== "auto" ? spend : hasCorporation ? "corporation-funds" : "money";
+    const keep = reserve + reservedCash(ns);
 
     for (let purchases = 0; purchases < MAX_PURCHASES_PER_TICK; purchases++) {
       const best = bestUpgrade(ns, isServers);
-      if (!best || best.cost > ns.getServerMoneyAvailable("home") - reserve || best.paybackSeconds > paybackSeconds) break;
+      if (!best || best.cost > ns.getServerMoneyAvailable("home") - keep || best.paybackSeconds > paybackSeconds) break;
       if (!buy(ns, best)) break;
       counters.bought[best.kind]++;
       counters.moneySpent += best.cost;
       if (best.kind === "new") log("bought", `${isServers ? "server" : "node"} ${ns.hacknet.numNodes() - 1} for $${ns.format.number(best.cost)}`);
     }
 
-    if (isServers) spendHashes(ns, mode, reserve, counters, log);
+    if (isServers) spendHashes(ns, mode, keep, counters, log);
 
     if (mode === "money" && !hasCorporation && !corporationAffordableLogged && ns.getServerMoneyAvailable("home") >= CORPORATION_COST) {
       corporationAffordableLogged = true;

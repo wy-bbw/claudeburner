@@ -44,7 +44,9 @@ const Mode = Object.freeze({ IDLE: "idle", PREP: "prep", BATCH: "batch", DRAIN: 
 // Runs on a rooted server. Uses home RAM too, except --home-reserve GB.
 // flags: --rep <fraction of RAM for share workers, default 0.1>, --home-reserve <GB, default 64>,
 //        --spacing <ms between landings, default 30>, --batches-per-target <max in flight, default 400>,
-//        --only <target>
+//        --only <target>, --stock-grow <host,host,...>: batch only these servers and grow them with {stock: true},
+//        which can raise their companies' stock forecasts (hacks stay without it, so they do not push it down;
+//        tools/stock-servers.js lists the servers of listed companies)
 // Log (readable lines): data/batcher.txt; snapshot: data/state.txt.
 /** @param {NS} ns */
 export async function main(ns) {
@@ -54,7 +56,8 @@ export async function main(ns) {
     return;
   }
   // Not "--share": the RAM calculator would bill `flags.share` as ns.share() (2.4 GB).
-  const flags = ns.flags([["rep", 0.1], ["home-reserve", 64], ["spacing", 30], ["batches-per-target", 400], ["only", ""]]);
+  const flags = ns.flags([["rep", 0.1], ["home-reserve", 64], ["spacing", 30], ["batches-per-target", 400], ["only", ""], ["stock-grow", ""]]);
+  const stockGrowTargets = new Set(String(flags["stock-grow"]).split(",").filter(Boolean));
   const shareFraction = Number(flags.rep), homeReserveGb = Number(flags["home-reserve"]);
   const spacingMs = Number(flags.spacing), onlyTarget = String(flags.only);
   const settings = { spacingMs, leadMs: LEAD_MS, growMargin: GROW_MARGIN, maxBatchesPerTarget: Number(flags["batches-per-target"]) };
@@ -94,7 +97,11 @@ export async function main(ns) {
       runtime.mode = Mode.DRAIN;
     }
   }
-  log("start", `on ${controllerHost}, spacing ${spacingMs} ms, share ${shareFraction}, adopted ${runtimes.size} draining targets`);
+  log("start", `on ${controllerHost}, spacing ${spacingMs} ms, share ${shareFraction}, adopted ${runtimes.size} draining targets`
+    + (stockGrowTargets.size ? `, stock grows on ${[...stockGrowTargets].join(",")}` : ""));
+  // Expected stock forecast hits per minute: a grow(stock) hits with chance = the share of max money it adds, and every
+  // batch regrows its hack fraction.
+  const stockHitsPerMinute = (/** @type {TargetPlan} */ plan) => plan.batchesPerSecond * plan.shape.hackFraction * 60;
 
   /** @param {Operation} operation */
   const enqueue = (operation) => {
@@ -172,6 +179,7 @@ export async function main(ns) {
       const optionsList = [];
       for (const host of rootedHosts) {
         if (onlyTarget && host !== onlyTarget) continue;
+        if (stockGrowTargets.size && !stockGrowTargets.has(host)) continue;
         if (ns.getServerMaxMoney(host) <= 0 || ns.getServerRequiredHackingLevel(host) > level) continue;
         const runtime = runtimeOf(host);
         const engaged = runtime.mode === Mode.BATCH || runtime.mode === Mode.PREP;
@@ -186,7 +194,8 @@ export async function main(ns) {
       const plans = planBatches(optionsList, planBudget);
       for (const [target, runtime] of runtimes) runtime.plan = plans.get(target) ?? null;
       for (const [target, plan] of plans) runtimeOf(target).plan = plan;
-      const summary = [...plans.values()].map((plan) => `${plan.target} ${(100 * plan.shape.hackFraction).toFixed(0)}%`).join(", ");
+      const summary = [...plans.values()].map((plan) => `${plan.target} ${(100 * plan.shape.hackFraction).toFixed(0)}%`
+        + (stockGrowTargets.has(plan.target) ? ` (~${stockHitsPerMinute(plan).toFixed(1)} stock hits/min)` : "")).join(", ");
       if (summary !== planSummary) {
         planSummary = summary;
         const moneyPerSecond = [...plans.values()].reduce((sum, plan) => sum + plan.moneyPerSecond, 0);
@@ -271,7 +280,8 @@ export async function main(ns) {
         if (perThread > 0) threads = Math.min(threads, Math.floor(batch.hackFraction / perThread + 1e-9));
         if (threads < 1) continue;
       }
-      const started = startThreads(ns, capacity, operation.script, threads, [batch.target, operation.landAt, batch.id]);
+      const stockOption = operation.script === GROW_WORKER && stockGrowTargets.has(batch.target) ? ["stock"] : [];
+      const started = startThreads(ns, capacity, operation.script, threads, [batch.target, operation.landAt, batch.id, ...stockOption]);
       if (started > 0) runtimeOf(batch.target).running.push({ threads: started, landAt: operation.landAt });
       if (started < threads && operation.script !== HACK_WORKER) {
         batch.cancelled = true;

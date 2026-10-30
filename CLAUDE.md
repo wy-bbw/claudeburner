@@ -54,7 +54,10 @@ Inside a theme folder the file name drops the theme prefix; role prefixes (`read
 What is there:
 - **Hacking**: `services/hacking/batcher.js` (HWGW batches with Formulas.exe; planner `lib/batch-planner.js`, log
   data/batcher.txt) or `controller.js` (without Formulas.exe), `metrics.js`; `workers/hacking/`; `tools/hacking/`
-  (batch-plan, check-grow, debug-hack-plan); `services/server-buyer.js` (by hand).
+  (batch-plan, check-grow, debug-hack-plan); `services/server-buyer.js` (by hand). Batcher `--stock-grow <hosts>`:
+  batches only those servers and grows them with {stock: true} (raises their stock's forecast target).
+- **Cash reserve**: `lib/cash-reserve.js` (data/cash-reserves.txt, {owner: dollars}): scripts set money aside for
+  themselves (stock trader capital, buy-stock-access); the hacknet manager does not spend it.
 - **Corporation**: `services/corp/manager.js` (logic in `lib/corp-manager-core.js`: products, pricing, Wilson/Advert,
   reinvesting, supplier scaling; log data/corp-manager.txt), `status.js` (dashboard feed), `supply.js` (replaces Smart
   Supply); `services/corp-startup.js` (startup phases, dry run unless `--go`; walkthrough `docs/corp-phase-2.md`),
@@ -62,7 +65,8 @@ What is there:
   add-division, adverts, boosts, expand, exports, limit-production, office, upgrades.
 - **Hacknet**: `services/hacknet/manager.js` (started by `start-hacknet.js`; servers or nodes, buys the upgrade with
   the most production per dollar within a payback time, spends hashes on money or corp funds/research; log
-  data/hacknet.txt). Hacking scripts never use hacknet servers (`isHacknetServer` in lib/net.js).
+  data/hacknet.txt). Hacking scripts never use hacknet servers (`isHacknetServer` in lib/net.js). Overflowing hashes
+  are sold for money by the game itself, so a full store with no manager still pays (but nothing gets upgraded).
 - **Augmentations and stats** (Singularity): `tools/buy-augmentations.js`, `tools/install-augmentations.js`,
   `tools/combat-augmentations.js`, `services/gym-trainer.js` and `gym-trainer-lowest-stat.js` (`lib/gym-training.js`),
   `tools/stat-eta.js`, `services/crime.js`.
@@ -77,7 +81,12 @@ What is there:
   Factori-Os, OpenWebAccessPoint, NIL, Pr0verFl0, DeepGreen.
 - **Coding contracts**: `services/coding-contracts/solver.js`, `lib/contract-solvers.js`; verify changes with
   `tools/coding-contracts/test-solvers.js` first.
-- **Stocks**: `services/stock-trader-4s.js` or `stock-trader.js` (never both; `lib/stock-trading.js`; meant for BN8).
+- **Stocks**: `services/stock-trader-4s.js` or `stock-trader.js` (never both; `lib/stock-trading.js`).
+  `stock-trader.js --capital <$>` trades with that much plus its profit and reserves the uninvested part (BN9 trial
+  2026-10-30, $10b capital: +$4.5b realised in ~1 h, mostly a few big trades). `tools/buy-stock-access.js` (WSE + TIX),
+  `tools/stock-servers.js` (company server per symbol, growable now), `services/stock-watch.js` (up-tick share per
+  minute). Manipulation via grow(stock) measured useless in BN9 at hacking 97: ~0.4 hits/min with all hacking RAM on
+  joesguns (0.1 forecast-target points per hit) against natural swings of ~30 points.
 - **General tools**: `tools/backdoor/` (chains, all), `path`, `root`, `kill`, `kill-all`, `usage`, `state`,
   `player-status`, `bitnode-status`, `bootstrap-purchases`, `money-sources` (income per source, measured over --seconds).
 

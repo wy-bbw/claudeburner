@@ -1,4 +1,5 @@
-import { STOCK_LOG, buyInOrder, logSummary, ownedShares, sellAllShares } from "lib/stock-trading.js";
+import { STOCK_LOG, buyInOrder, investedAtCost, logSummary, ownedShares, sellAllShares } from "lib/stock-trading.js";
+import { setCashReserve } from "lib/cash-reserve.js";
 import { appendLog } from "lib/log.js";
 
 // Ticks for the forecast estimate (50 ticks = 5 min warm-up). The estimate's noise is ±0.07 at 50 ticks;
@@ -10,6 +11,8 @@ const LONG_WINDOW = 50;
 const SHORT_WINDOW = 10;
 const QUICK_SELL_MAX_UPS = 2;
 const SUMMARY_EVERY_TICKS = 10; // one tick is 6 s: a summary per minute
+const RESERVE_OWNER = "stock-trader";
+const WAIT_FOR_TIX_MS = 5_000;
 
 // stock-trader.js: trades without the 4S API by estimating each forecast from price history:
 // the share of the last LONG_WINDOW ticks that went up (35 of 50 up ≈ forecast 0.7).
@@ -18,14 +21,24 @@ const SUMMARY_EVERY_TICKS = 10; // one tick is 6 s: a summary per minute
 // Once the 4S Market Data TIX API is owned, services/stock-trader-4s.js trades better: stop this one, start that.
 // Log: data/stocks.txt. RAM ~14.6 GB (stock functions cost 2-2.5 GB each).
 // Flags: --buy-above <estimated forecast, default 0.65> --sell-below <default 0.5> --keep <cash fraction to keep, default 0>
+//        --capital <dollars, default 0 = all cash>: trade with at most this much plus the profit it made. The part not
+//        in stocks is reserved (lib/cash-reserve.js), so the hacknet manager does not spend it; waits for the TIX
+//        API (tools/buy-stock-access.js) with the capital reserved.
 // With 50 ticks a neutral stock (0.5) reaches 0.65 by chance in 1.6% of ticks, a good one (0.65) falls below 0.5 in 1%.
 /** @param {NS} ns */
 export async function main(ns) {
   ns.disableLog("ALL");
-  const options = ns.flags([["buy-above", 0.65], ["sell-below", 0.5], ["keep", 0]]);
+  const options = ns.flags([["buy-above", 0.65], ["sell-below", 0.5], ["keep", 0], ["capital", 0]]);
   const buyAbove = Number(options["buy-above"]), sellBelow = Number(options["sell-below"]), keepFraction = Number(options.keep);
+  const capital = Number(options.capital);
+  ns.atExit(() => setCashReserve(ns, RESERVE_OWNER, 0));
+  while (!ns.stock.hasTixApiAccess()) {
+    setCashReserve(ns, RESERVE_OWNER, capital);
+    await ns.sleep(WAIT_FOR_TIX_MS);
+  }
   const symbols = ns.stock.getSymbols();
-  appendLog(ns, STOCK_LOG, "start", `history trader: buy above ${buyAbove}, sell below ${sellBelow}, keep ${keepFraction * 100}% cash`);
+  appendLog(ns, STOCK_LOG, "start", `history trader: buy above ${buyAbove}, sell below ${sellBelow}, keep ${keepFraction * 100}% cash, `
+    + `capital ${capital > 0 ? "$" + ns.format.number(capital) : "all cash"}`);
 
   /** Per symbol: 1 for every tick that went up, 0 for down, newest last. @type {Map<string, number[]>} */
   const moves = new Map(symbols.map((symbol) => [symbol, []]));
@@ -61,7 +74,10 @@ export async function main(ns) {
       .filter((stock) => stock.ticks >= LONG_WINDOW && stock.longEstimate >= buyAbove && stock.shortEstimate >= 0.5)
       .sort((a, b) => b.longEstimate - a.longEstimate)
       .map((stock) => ({ symbol: stock.symbol, reason: `estimate ${stock.longEstimate.toFixed(2)} over ${stock.ticks} ticks` }));
-    buyInOrder(ns, candidates, ns.getServerMoneyAvailable("home") * (1 - keepFraction));
+    // With --capital: the capital plus the profit so far, minus what is in stocks (at cost), is this trader's cash.
+    const ownCash = capital > 0 ? Math.max(0, capital + realisedProfit - investedAtCost(ns, symbols)) : Infinity;
+    buyInOrder(ns, candidates, Math.min(ownCash, ns.getServerMoneyAvailable("home") * (1 - keepFraction)));
+    if (capital > 0) setCashReserve(ns, RESERVE_OWNER, Math.max(0, capital + realisedProfit - investedAtCost(ns, symbols)));
 
     if (tick % SUMMARY_EVERY_TICKS === 0) logSummary(ns, symbols, realisedProfit);
     if (!told4S && ns.stock.has4SDataTixApi()) {
