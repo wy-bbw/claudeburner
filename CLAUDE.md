@@ -79,7 +79,7 @@ What is there:
   `tools/coding-contracts/test-solvers.js` first.
 - **Stocks**: `services/stock-trader-4s.js` or `stock-trader.js` (never both; `lib/stock-trading.js`; meant for BN8).
 - **General tools**: `tools/backdoor/` (chains, all), `path`, `root`, `kill`, `kill-all`, `usage`, `state`,
-  `player-status`, `bitnode-status`, `bootstrap-purchases`.
+  `player-status`, `bitnode-status`, `bootstrap-purchases`, `money-sources` (income per source, measured over --seconds).
 
 ## Key facts (game code v3.0.1; details and more in the old CLAUDE.md, see above)
 - Servers start at 4% of max money: low-growth targets need hours of prep.

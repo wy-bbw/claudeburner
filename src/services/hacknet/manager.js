@@ -16,8 +16,10 @@ const SPEND_MODES = ["auto", "money", "corporation-funds", "corporation-research
 //   - buys the upgrade (level, RAM, cores, new server/node) with the most production per dollar, as long as it
 //     pays back within --payback-hours and leaves --reserve; hashes are valued at their Sell for Money price.
 //     A new server counts together with its cheap first upgrades (newServerBundle, needs Formulas.exe).
-//     24 h was the fastest way to $150b in a simulation of the BN9 start (2026-10-30: 12 h ~46 h, 24 h ~40 h,
-//     48 h ~45 h, 72 h ~51 h); with a nearer install, use a payback below the time left until it.
+//     Simulated time to $150b in BN9 (2026-10-30): at the start 24 h was best (12 h ~46 h, 24 h ~40 h, 48 h ~45 h);
+//     after the hacknet augmentations, with $142m/min of infiltration, 12 h (6 h 8.8 h, 12 h 9.1 h, 24 h 11.7 h, but
+//     12 h ends with ~35% more hashes/s than 6 h). The faster money grows, the shorter the best payback; with a nearer
+//     install, use a payback below the time left until it.
 //   - servers: spends the hashes by --spend
 //       auto                  money until a corporation exists, then corporation-funds
 //       money                 Sell for Money (4 hashes -> $1m)
@@ -28,11 +30,11 @@ const SPEND_MODES = ["auto", "money", "corporation-funds", "corporation-research
 // Production formulas from src/Hacknet/formulas (v3.0.1); the player and BitNode multiplier is measured from
 // the current production. Without Formulas.exe a new server counts only its own production.
 // Log (readable lines): data/hacknet.txt, a status line every 5 minutes.
-// Usage: run services/hacknet/manager.js [--payback-hours 24] [--reserve 0] [--spend auto]
+// Usage: run services/hacknet/manager.js [--payback-hours 12] [--reserve 0] [--spend auto]
 /** @param {NS} ns */
 export async function main(ns) {
   ns.disableLog("ALL");
-  const flags = ns.flags([["payback-hours", 24], ["reserve", 0], ["spend", "auto"]]);
+  const flags = ns.flags([["payback-hours", 12], ["reserve", 0], ["spend", "auto"]]);
   const paybackSeconds = Number(flags["payback-hours"]) * 3600;
   const reserve = Number(flags.reserve);
   const spend = String(flags.spend);
