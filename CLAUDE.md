@@ -70,7 +70,8 @@ What is there:
   factions, soft resets, repeats; every reset wipes money and stats, so run it right after an install; stop early with
   data/intelligence-farm-stop.txt; log data/intelligence-farm.txt; cycle rate not measured yet).
 - **Infiltration**: `services/infiltration-autopilot.js` (target choice, travel, solve, trade or sell),
-  `services/infiltration-solver.js` (solver only), `lib/infiltration-minigames.js`, `tools/infiltrations.js`.
+  `services/infiltration-solver.js` (solver only), `lib/infiltration-minigames.js`, `lib/infiltration-targets.js`
+  (ranking), `tools/infiltrations.js` (all targets), `tools/best-infiltration.js` (best money per second and its city).
 - **Darknet**: `services/darknet/orchestrator.js` (started by start.js) -> `workers/darknet/crawl.js`, `phish.js`;
   password models in `lib/darknet-models.js`; `tools/darknet/` (map, crack); log data/darknet.txt. Unsolved models:
   Factori-Os, OpenWebAccessPoint, NIL, Pr0verFl0, DeepGreen.

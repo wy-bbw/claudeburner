@@ -1,3 +1,4 @@
+import { cycleSeconds } from "lib/infiltration-targets.js";
 import { appendLog } from "lib/log.js";
 import {
   DEMAND_DECAY_PER_SECOND, REFUSE_DIFFICULTY, chooseTradeFaction, findInfiltration, floorsForDemand, pressInfiltrateButton, readMarketDemand,
@@ -6,8 +7,6 @@ import {
 
 const LOG_FILE = "data/infiltration-autopilot.txt";
 const TICK_MS = 5;
-const SECONDS_PER_LEVEL = 1.3; // 0.9 s "Get Ready" plus the odd wait in the slash game; only used to rank targets
-const SECONDS_PER_RUN = 6; // open, start, trade
 const OPEN_TIMEOUT_MS = 4_000; // "Infiltrate Company" must show up this soon after goToLocation
 const TRADE_TIMEOUT_MS = 3_000;
 const RETRY_COOLDOWN_MS = 15_000;
@@ -204,10 +203,7 @@ function pickTarget(ns, policy) {
     const info = ns.infiltration.getInfiltration(location.name);
     if (info.difficulty > policy.maxDifficulty) continue;
     const value = mode === "rep" ? info.reward.tradeRep : info.reward.sellCash;
-    // cycle = the longer of the run and the time the floors need to decay back: after a start the floors are F* + levels
-    const runSeconds = info.maxClearanceLevel * SECONDS_PER_LEVEL + SECONDS_PER_RUN;
-    const paceSeconds = policy.minDemand > 0 ? Math.log(1 + info.maxClearanceLevel / floorsForDemand(policy.minDemand)) / DEMAND_DECAY_PER_SECOND : 0;
-    const score = value / Math.max(runSeconds, paceSeconds);
+    const score = value / cycleSeconds(info.maxClearanceLevel, policy.minDemand);
     if (!best || score > best.score) {
       best = { name: location.name, city: location.city, difficulty: info.difficulty, levels: info.maxClearanceLevel, value, mode, warning, score };
     }
