@@ -1,4 +1,4 @@
-import { scanAll } from "lib/net.js";
+import { isHacknetServer, scanAll } from "lib/net.js";
 import { countOpeners, tryRoot } from "lib/targets.js";
 import { TARGET_PORT } from "lib/ports.js";
 
@@ -98,7 +98,7 @@ export async function main(ns) {
         ns.print("Formulas.exe owned: handing over to the batcher via start.js");
         await ns.sleep(60_000); // start.js kills this process
       }
-      const hosts = [...scanAll(ns).keys()].filter((host) => host !== "home");
+      const hosts = [...scanAll(ns).keys()].filter((host) => host !== "home" && !isHacknetServer(host));
       portOpeners = countOpeners(ns);
       for (const host of hosts) tryRoot(ns, host, portOpeners);
       rootedHosts = hosts.filter((host) => ns.hasRootAccess(host));

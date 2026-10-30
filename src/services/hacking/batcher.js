@@ -1,4 +1,4 @@
-import { scanAll } from "lib/net.js";
+import { isHacknetServer, scanAll } from "lib/net.js";
 import { countOpeners, tryRoot } from "lib/targets.js";
 import { TARGET_PORT } from "lib/ports.js";
 import { appendLog } from "lib/log.js";
@@ -113,7 +113,7 @@ export async function main(ns) {
     // --- every PLAN_INTERVAL_MS: network, foreign jobs, share workers, plan ---
     if (now - lastPlanAt >= PLAN_INTERVAL_MS) {
       lastPlanAt = now;
-      const hosts = [...scanAll(ns).keys()].filter((host) => host !== "home");
+      const hosts = [...scanAll(ns).keys()].filter((host) => host !== "home" && !isHacknetServer(host));
       portOpeners = countOpeners(ns);
       for (const host of hosts) tryRoot(ns, host, portOpeners);
       rootedHosts = hosts.filter((host) => ns.hasRootAccess(host));

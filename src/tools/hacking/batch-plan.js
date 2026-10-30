@@ -1,4 +1,4 @@
-import { scanAll } from "lib/net.js";
+import { isHacknetServer, scanAll } from "lib/net.js";
 import { planBatches, targetOptions } from "lib/batch-planner.js";
 
 const REPORT_FILE = "data/batch-plan.txt";
@@ -9,7 +9,7 @@ const REPORT_FILE = "data/batch-plan.txt";
 /** @param {NS} ns */
 export async function main(ns) {
   const flags = ns.flags([["threads", 0], ["spacing", 30], ["batches-per-target", 400]]);
-  const hosts = [...scanAll(ns).keys()].filter((host) => ns.hasRootAccess(host));
+  const hosts = [...scanAll(ns).keys()].filter((host) => !isHacknetServer(host) && ns.hasRootAccess(host));
   const budget = Number(flags.threads) || hosts.reduce((sum, host) => sum + Math.floor(ns.getServerMaxRam(host) / 1.8), 0);
   const player = ns.getPlayer();
   const settings = { spacingMs: Number(flags.spacing), leadMs: 1000, growMargin: 1.05, maxBatchesPerTarget: Number(flags["batches-per-target"]) };

@@ -28,3 +28,11 @@ export function pathTo(parents, host) {
   for (let h = /** @type {string|null|undefined} */ (host); h; h = parents.get(h)) path.unshift(h);
   return path;
 }
+
+/**
+ * Hacknet servers reject the hacking API, and RAM used on them lowers their hash rate.
+ * @param {string} host
+ */
+export function isHacknetServer(host) {
+  return host.startsWith("hacknet-server-");
+}
