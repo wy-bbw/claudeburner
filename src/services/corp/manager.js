@@ -7,7 +7,7 @@ import { runCorporationManager } from "lib/corp-manager-core.js";
 // script would need ~510 GB; they answer through a port. Requests from tools still come through data/corp-requests.txt.
 // RAM: ~113 GB (the corporation read calls: 11 x 10 GB) plus 21.6 GB for one action worker at a time.
 // Dashboard: it does not feed it; run services/corp/status.js next to it if you want the corporation panel.
-// Usage: run services/corp/manager.js [--division all|tobacco,sicko] [--city Aevum] [--reinvest-minutes 30]
+// Usage: run services/corp/manager.js [--division all|tobacco,sicko] [--city Aevum] [--reinvest-minutes 3]
 /** @param {NS} ns */
 export async function main(ns) {
   await runCorporationManager(ns);

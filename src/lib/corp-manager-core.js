@@ -21,6 +21,8 @@ const WILSON = "Wilson Analytics";
 const WILSON_BASE_PRICE = 4e9, WILSON_PRICE_MULT = 2;
 const ADVERT_BASE_PRICE = 1e9, ADVERT_PRICE_MULT = 1.06;
 const MAX_ADVERTS_PER_ROUND = 20;
+// Share of the funds each reinvest round spends on corporation upgrades first (2026-11-08: 20% -> 60%, user's call for growth).
+const UPGRADES_SHARE = 0.6;
 // A restart must not postpone the growth by the whole --reinvest-minutes: the first reinvest comes this long after the start.
 const FIRST_REINVEST_DELAY_MS = 120_000;
 // Staffing (lib/corp-staffing.js, from the game code v3.0.1): every office puts researchShare of its workers on R&D (product
@@ -78,7 +80,7 @@ const SUPPLIER_GROWTH_PAUSE_MS = 3 * 60_000;
 //   tools/corp/expand.js (a division in every city), tools/corp/exports.js (supply chain exports between divisions),
 //   tools/corp/limit-production.js (cap a material's production, e.g. Robots in Robotics),
 //   tools/corp/add-division.js (all set-up steps for a new division in one go).
-// --reinvest-minutes N (default 5, 0 = off) queues upgrades (20% of funds), main office (15%), all offices (10%) and boosts
+// --reinvest-minutes N (default 5, 0 = off) queues upgrades (60% of funds), main office (15%), all offices (10%) and boosts
 // (10%) of every product division every N minutes, plus 5% offices + 5% boosts for suppliers that cannot feed their importers
 // (each request spends its share of the funds when it runs). Between those rounds a supplier whose exports take everything it
 // makes (nothing left to sell) grows by 3% offices + 3% boosts every 3 minutes until a surplus is left (sold at MP).
@@ -146,7 +148,7 @@ export async function runCorporationManager(ns) {
       const covered = new Set([...growing.map((entry) => entry.name), ...suppliers]);
       const reassigned = state.divisions.filter((/** @type {{name: string}} */ entry) => !covered.has(entry.name));
       const reinvest = [
-        { type: "upgrades", names: AUTO_UPGRADES, budgetFraction: 0.2, time },
+        { type: "upgrades", names: AUTO_UPGRADES, budgetFraction: UPGRADES_SHARE, time },
         ...reassigned.map((/** @type {{name: string}} */ entry) => ({ type: "office", division: entry.name, city: "all", size: 0, budgetFraction: 0, jobs: null, time })),
         ...growing.flatMap((entry, index) => [
           { type: "office", division: entry.name, city: mainCityOf(entry, preferredCity), size: 0, budgetFraction: 0.15 / (growing.length - index), jobs: null, time },
@@ -159,7 +161,7 @@ export async function runCorporationManager(ns) {
         ]),
       ];
       ns.write(REQUESTS_FILE, reinvest.map((request) => JSON.stringify(request) + "\n").join(""), "a");
-      log("reinvest", `queued upgrades 20%; main office 15%, all offices 10%, boosts 10% of funds split over ${growing.map((entry) => entry.name).join(", ") || "no product division"}; suppliers (starved or quality-limited consumers, 5% + 5%): ${suppliers.join(", ") || "none"}`);
+      log("reinvest", `queued upgrades ${UPGRADES_SHARE * 100}%; main office 15%, all offices 10%, boosts 10% of funds split over ${growing.map((entry) => entry.name).join(", ") || "no product division"}; suppliers (starved or quality-limited consumers, 5% + 5%): ${suppliers.join(", ") || "none"}`);
       for (const name of suppliers) lastSupplierGrowth.set(name, Date.now());
     }
 

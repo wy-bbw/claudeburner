@@ -10,10 +10,12 @@ export const UPGRADE_PRICES = {
   "ABC SalesBots": { basePrice: 1e9, priceMult: 1.07 },
   "Project Insight": { basePrice: 5e9, priceMult: 1.07 },
 };
-// Bought by tools/corp/upgrades.js: production, storage, employee stats (production, product rating, quality), RP.
-// Not Wilson Analytics (services/corp/manager.js buys it with Advert) and not ABC SalesBots (products sell out anyway).
+// Bought by tools/corp/upgrades.js: production, storage, employee stats (production, product rating, quality), RP, sales.
+// Not Wilson Analytics (services/corp/manager.js buys it with Advert). ABC SalesBots pays even when everything sells: max
+// sales = ... x salesBots x (markupLimit / (price - MP))^2 (v3.0.1 Division.ts processSaleState), so the price
+// premium over MP grows with sqrt(salesBots) and revenue above MP with sqrt(sales x production): +1% sales = +1% production.
 export const AUTO_UPGRADES = ["Smart Factories", "Smart Storage", "Neural Accelerators", "FocusWires",
-  "Speech Processor Implants", "Nuoptimal Nootropic Injector Implants", "Project Insight"];
+  "Speech Processor Implants", "Nuoptimal Nootropic Injector Implants", "Project Insight", "ABC SalesBots"];
 
 /** @param {string} name @param {number} level */
 export function upgradeCost(name, level) {

@@ -80,13 +80,17 @@ export function officeGoal(state, divisionName, city, developmentCity) {
     ...(state.products ?? []).filter((/** @type {any} */ row) => row.division === divisionName && row.city === city && row.productionAmount > 0),
   ];
   // Exported output is not unsold: whatever an exporting row does not sell counts as exported (the export amount is a formula).
-  const exporting = rows.filter((row) => row.exports?.length), selling = rows.filter((row) => !row.exports?.length);
+  // Output with neither a sell order nor an export (a new division before its sell orders) says nothing about sales.
+  const ordered = (/** @type {any} */ row) => Boolean(row.desiredSellAmount) && row.desiredSellAmount !== "0";
+  const exporting = rows.filter((row) => row.exports?.length), selling = rows.filter((row) => !row.exports?.length && ordered(row));
   const exported = exporting.reduce((sum, row) => sum + Math.max(0, row.productionAmount - (row.actualSellAmount ?? 0)), 0);
-  const total = rows.reduce((sum, row) => sum + row.productionAmount, 0);
+  const total = [...exporting, ...selling].reduce((sum, row) => sum + row.productionAmount, 0);
   const produced = selling.reduce((sum, row) => sum + row.productionAmount, 0);
   const sold = selling.reduce((sum, row) => sum + Math.max(0, row.actualSellAmount ?? 0), 0);
   if (total > 0 && exported >= total / 2) return { goal: "production", sold, produced };
-  if (produced > 0 && sold < 0.95 * produced) return { goal: "sales", sold, produced };
+  // Nothing sold at all scores every split 0 in bestSplit (the first, all Business, would win: 2026-11-08 sicksick offices
+  // without Operations and Engineers): only a partial sale is a sales goal.
+  if (produced > 0 && sold > 0 && sold < 0.95 * produced) return { goal: "sales", sold, produced };
   return { goal: "balanced", sold, produced };
 }
 
