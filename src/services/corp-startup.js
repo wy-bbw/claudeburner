@@ -12,16 +12,16 @@ import { potentialSales } from "lib/corp-market.js";
 //                          production after the fill (lib/corp-boosts.js bestStorageUpgrades), then the boost fill as BUY ORDERS
 //                          (debt), then wait for 75 research points, then jobs Operations 1 / Engineer 1 / Business 1 / Management 1
 //   --phase after-round-1  after accepting round 1 (the user's approach, 2026-10-23): unlocks Market Research - Demand +
-//                          Market Data - Competition (our TA.II prices), Smart Supply, Export; a Chemical division (--chemical
-//                          <name>) in all six cities, offices 3 -> 6 (Ops 1 / Eng 2 / Business 1 / Mgmt 1 / R&D 1), Smart Supply on
-//                          in both divisions with imports on "leftovers", exports Plants Agriculture -> Chemical and Chemicals
-//                          Chemical -> Agriculture ((IPROD+IINV/10)*(-1) each = consumption minus a tenth of the importer's stock, every city; an existing export with another amount is replaced), Chemicals sold MAX at MP, Chemical warehouses +3
-//                          levels (to 4); Agriculture offices 4 -> 7 with the 3 new employees on R&D; fill both divisions; wait
+//                          Market Data - Competition (our TA.II prices), Export (no Smart Supply: services/corp/supply.js buys
+//                          the inputs, imports counted as stock); a Chemical division (--chemical
+//                          <name>) in all six cities, offices 3 -> 6 (Ops 1 / Eng 2 / Business 1 / Mgmt 1 / R&D 1), exports Plants Agriculture -> Chemical and Chemicals
+//                          Chemical -> Agriculture ((IPROD+IINV/10)*(-1) each = consumption minus a tenth of the importer's stock, every city; an existing export with another amount is replaced), Chemicals sold MAX at MP, Chemical warehouses
+//                          as high as the cash minus --reserve pays (same level in every city); Agriculture offices 4 -> 7 with the 3 new employees on R&D; fill both divisions; wait
 //                          for 700 research points in Agriculture, then its R&D staff move to Operations/Business (3/1/2/1);
 //                          Chemical keeps 1/2/1/1/1. Asks for the Chemical division's
 //                          name unless --chemical is given or one exists. Then start services/corp/manager.js --upkeep-and-prices-only.
 //   --phase product-division  a Tobacco division (--product <name>, asked for unless given or one exists; --product-industry
-//                          for another industry) in all six cities with Smart Supply ("leftovers"), Plants exported to it from
+//                          for another industry) in all six cities (inputs: services/corp/supply.js), Plants exported to it from
 //                          Agriculture ((IPROD+IINV/10)*(-1)), Aevum (the development office) to 20 employees with the
 //                          fastest-development split (~5% Ops / 47% Eng / 47% Mgmt, interns from 9), the first product
 //                          developed there (--product-investment of the cash each for design and marketing), warehouses +2
@@ -84,18 +84,17 @@ const PHASES = {
     { step: "staff", size: 4, jobs: { Operations: 1, Engineer: 1, Business: 1, Management: 1 } },
   ],
   "after-round-1": [
-    { step: "unlocks", names: ["Market Research - Demand", "Market Data - Competition", "Smart Supply", "Export"] },
+    // No Smart Supply unlock ($25b, more warehouse levels instead): services/corp/supply.js buys the inputs.
+    { step: "unlocks", names: ["Market Research - Demand", "Market Data - Competition", "Export"] },
     { step: "create-division", division: "chemical", industry: "Chemical" },
     { step: "expand", division: "chemical" },
     { step: "staff", division: "chemical", size: 6, jobs: { Operations: 1, Engineer: 2, Business: 1, Management: 1, [RESEARCH_JOB]: 1 } },
     { step: "staff", size: 7, jobs: { Operations: 1, Engineer: 1, Business: 1, Management: 1, [RESEARCH_JOB]: 3 } },
-    { step: "smart-supply" },
-    { step: "smart-supply", division: "chemical" },
     // The guide's amount: the importer's consumption per second (-IPROD) minus a tenth of what it already holds (IINV/10).
     { step: "exports", from: "agriculture", to: "chemical", material: "Plants", amount: EXPORT_AMOUNT },
     { step: "exports", from: "chemical", to: "agriculture", material: "Chemicals", amount: EXPORT_AMOUNT },
     { step: "sell-orders", division: "chemical" },
-    { step: "warehouses", division: "chemical", levels: 3 },
+    { step: "warehouses", division: "chemical", level: "affordable" },
     { step: "fill" },
     { step: "fill", division: "chemical" },
     { step: "research", points: 700 },
@@ -105,7 +104,6 @@ const PHASES = {
   "product-division": [
     { step: "create-division", division: "product" },
     { step: "expand", division: "product" },
-    { step: "smart-supply", division: "product" },
     { step: "exports", from: "agriculture", to: "product", material: "Plants", amount: EXPORT_AMOUNT },
     { step: "staff", division: "product", city: "Aevum", size: 20, weights: DEVELOPMENT_WEIGHTS },
     { step: "make-product", division: "product", city: "Aevum" },
@@ -241,8 +239,10 @@ async function planStep(ns, entry, snapshot, planned, flags, say) {
 
   switch (entry.step) {
     case "expand": {
-      const newCities = ALL_CITIES.filter((city) => !info.cities.includes(city));
-      const withWarehouse = new Set(warehouses.map((/** @type {{city: string}} */ warehouse) => warehouse.city));
+      // A division not created yet (dry run) starts like a new one in the game: office and warehouse in Sector-12 only.
+      const cities = info.exists === false ? ["Sector-12"] : info.cities;
+      const newCities = ALL_CITIES.filter((city) => !cities.includes(city));
+      const withWarehouse = new Set(info.exists === false ? cities : warehouses.map((/** @type {{city: string}} */ warehouse) => warehouse.city));
       const needWarehouse = ALL_CITIES.filter((city) => !withWarehouse.has(city));
       lines.push(`open ${newCities.join(", ") || "no new cities"}; warehouses in ${needWarehouse.join(", ") || "none needed"}`);
       cost = newCities.length * 4e9 + needWarehouse.length * 5e9;
@@ -342,16 +342,23 @@ async function planStep(ns, entry, snapshot, planned, flags, say) {
     case "warehouses": {
       /** @type {unknown[][]} */
       const calls = [];
-      for (const city of ALL_CITIES) {
-        const warehouse = warehouses.find((/** @type {{city: string}} */ entryWarehouse) => entryWarehouse.city === city);
-        const level = warehouse?.level ?? planned.levels.get(city) ?? 1;
-        // entry.level: absolute target; entry.levels: that many levels above level 1 (a new division's warehouses).
-        const target = entry.level ?? 1 + entry.levels;
+      const currentLevels = ALL_CITIES.map((city) => warehouses.find((/** @type {{city: string}} */ entryWarehouse) => entryWarehouse.city === city)?.level
+        ?? planned.levels.get(city) ?? 1);
+      const costTo = (/** @type {number} */ target) => currentLevels.reduce((sum, level) => sum + warehouseUpgradeCost(level, Math.max(0, target - level)), 0);
+      // entry.level: absolute target, or "affordable" = the highest level in every city that the cash (minus --reserve)
+      // pays; entry.levels: that many levels above level 1 (a new division's warehouses).
+      let target = entry.level === "affordable" ? Math.max(...currentLevels) : Number(entry.level ?? 1 + entry.levels);
+      if (entry.level === "affordable") {
+        const budget = (go ? snapshot.corporation.funds : planned.funds) - Number(flags.reserve);
+        while (costTo(target + 1) <= budget) target++;
+      }
+      ALL_CITIES.forEach((city, index) => {
+        const level = currentLevels[index];
         const levels = Math.max(0, target - level);
         if (levels) { calls.push([division, city, levels]); cost += warehouseUpgradeCost(level, levels); }
         planned.levels.set(city, Math.max(level, target));
-      }
-      lines.push(`warehouses to level ${entry.level ?? 1 + entry.levels} (${calls.length} cities need upgrades)`);
+      });
+      lines.push(`warehouses to level ${target} (${calls.length} cities need upgrades)`);
       run = async () => { if (calls.length) await act(ns, say, "upgrade-warehouse", calls); };
       break;
     }
@@ -559,17 +566,24 @@ async function planStep(ns, entry, snapshot, planned, flags, say) {
       run = async () => {
         if (!orders.length) return;
         await act(ns, say, "buy-material", orders.map((order) => [division, order.city, order.material, order.amount / SECONDS_PER_MARKET_CYCLE]));
+        let pending = orders;
         try {
           // The materials reader returns after each SALE state; the order was paid once the stock reaches the target.
+          // Each delivered order is cancelled at once: a buy order buys every cycle, so one left running while others are
+          // still missing overstocks its material until the warehouse is full (2026-11-08: Hardware filled the Chemical
+          // warehouses to 100%, no room for Plants and Water, production 0).
           for (let poll = 0; poll < FILL_POLL_LIMIT; poll++) {
             const stock = await runReader(ns, "materials", [JSON.stringify(places)]);
-            const missing = orders.filter((order) => (stock.find((/** @type {{city: string, name: string}} */ row) => row.city === order.city && row.name === order.material)?.stored ?? 0) < order.target * 0.99);
-            say(`  buy orders: ${orders.length - missing.length}/${orders.length} delivered`);
-            if (!missing.length) return;
+            const missing = pending.filter((order) => (stock.find((/** @type {{city: string, name: string}} */ row) => row.city === order.city && row.name === order.material)?.stored ?? 0) < order.target * 0.99);
+            const delivered = pending.filter((order) => !missing.includes(order));
+            if (delivered.length) await act(ns, say, "buy-material", delivered.map((order) => [division, order.city, order.material, 0]));
+            pending = missing;
+            say(`  buy orders: ${orders.length - pending.length}/${orders.length} delivered`);
+            if (!pending.length) return;
           }
           say("  buy orders not fully delivered in time (warehouse full or funds problem?): check the warehouses");
         } finally {
-          await act(ns, say, "buy-material", orders.map((order) => [division, order.city, order.material, 0]));
+          if (pending.length) await act(ns, say, "buy-material", pending.map((order) => [division, order.city, order.material, 0]));
         }
       };
       break;
