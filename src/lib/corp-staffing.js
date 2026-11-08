@@ -34,11 +34,13 @@ export function developmentSpeed(ops, eng, mgmt) {
 export const businessFactor = (business) => (1 + business) ** 0.26;
 
 /**
- * Best job fractions of `workers` employees (each producing `perEmployee`) for a goal, searched on a 1/40 grid.
+ * Best job split of `workers` employees (each producing `perEmployee`) for a goal: up to 40 workers over whole employees
+ * (rounding a fractional optimum afterwards can drop a job: 2026-11-08, 3-person offices got Business 1 and no Operations
+ * or Engineer, production 0), more on a 1/40 grid.
  * @param {"development" | "production" | "sales" | "balanced"} goal
  * @param {number} workers @param {number} perEmployee
  * @param {{sold: number, produced: number, current: Record<string, number>}} [sales] for "sales": last cycle and the current job counts
- * @returns {Record<string, number>} employees per job (fractional; lib/corp-offices.js jobSplit rounds)
+ * @returns {Record<string, number>} employees per job (fractional above 40 workers; lib/corp-offices.js jobSplit rounds)
  */
 export function bestSplit(goal, workers, perEmployee, sales) {
   const amount = (/** @type {number} */ fraction) => fraction * workers * perEmployee;
@@ -46,7 +48,8 @@ export function bestSplit(goal, workers, perEmployee, sales) {
   const productionNow = productionFactor((current.Operations ?? 0) * perEmployee, (current.Engineer ?? 0) * perEmployee, (current.Management ?? 0) * perEmployee) || 1;
   const businessNow = businessFactor((current.Business ?? 0) * perEmployee);
   let best = { value: -1, fractions: { Operations: 0, Engineer: 1, Business: 0, Management: 0 } };
-  const steps = Math.round(1 / SHARE_STEP);
+  if (workers <= 0) return { Operations: 0, Engineer: 0, Business: 0, Management: 0 };
+  const steps = Number.isInteger(workers) && workers <= 1 / SHARE_STEP ? workers : Math.round(1 / SHARE_STEP);
   for (let o = 0; o <= steps; o++) {
     for (let e = 0; e <= steps - o; e++) {
       for (let m = 0; m <= steps - o - e; m++) {
@@ -89,7 +92,8 @@ export function officeGoal(state, divisionName, city, developmentCity) {
 
 /**
  * Job weights for an office of `size` employees: interns (from 9 on, 1/9) are left to jobSplit; researchShare of the
- * workers on R&D (none in the development city), the rest by officeGoal.
+ * workers on R&D, rounded to whole employees and leaving at least one for the other jobs (none in the development city),
+ * the rest by officeGoal.
  * @param {any} state @param {string} divisionName @param {any} office its entry in state.offices (current jobs and production)
  * @param {number} size @param {string | null} developmentCity @param {number} researchShare
  * @returns {{jobs: Record<string, number>, goal: string}}
@@ -99,7 +103,7 @@ export function officeJobs(state, divisionName, office, size, developmentCity, r
   const working = Math.max(1, (office.numEmployees ?? 0) - (office.employeeJobs?.Intern ?? 0) - (office.employeeJobs?.Unassigned ?? 0));
   const perEmployee = (office.employeeProductionByJob?.total ?? 0) / working || DEFAULT_PRODUCTION_PER_EMPLOYEE;
   const { goal, sold, produced } = officeGoal(state, divisionName, office.city, developmentCity);
-  const researchWorkers = goal === "development" ? 0 : workers * researchShare;
+  const researchWorkers = goal === "development" ? 0 : Math.max(0, Math.min(Math.round(workers * researchShare), workers - 1));
   const split = bestSplit(goal, workers - researchWorkers, perEmployee, { sold, produced, current: office.employeeJobs ?? {} });
   return { jobs: { ...split, [RESEARCH_JOB]: researchWorkers }, goal };
 }

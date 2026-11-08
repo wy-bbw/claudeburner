@@ -180,12 +180,13 @@ export async function runCorporationManager(ns) {
       }
     }
 
-    // Offices with unassigned employees or more interns than the 1/9 they need (HRBuddy research hires every cycle, as
-    // interns with HRBuddy-Training; enlarged offices fill up between reinvest rounds): reassign them now, at no cost.
+    // Offices with empty slots (enlarged by hand or a tool), unassigned employees or more interns than the 1/9 they need
+    // (HRBuddy research hires every cycle, as interns with HRBuddy-Training): hire and reassign them now, at no cost
+    // (2026-11-08: memo offices enlarged to 18 kept 3 employees until the next reinvest round).
     if (!flags["upkeep-and-prices-only"]) {
       const queuedNow = ns.read(REQUESTS_FILE);
-      const unbalanced = [...new Set((state.offices ?? []).filter((/** @type {{size: number, employeeJobs: Record<string, number>}} */ office) =>
-        (office.employeeJobs?.Unassigned ?? 0) > 0 || (office.employeeJobs?.Intern ?? 0) > (office.size >= 9 ? Math.ceil(office.size / 9) : 0))
+      const unbalanced = [...new Set((state.offices ?? []).filter((/** @type {{size: number, numEmployees: number, employeeJobs: Record<string, number>}} */ office) =>
+        office.numEmployees < office.size || (office.employeeJobs?.Unassigned ?? 0) > 0 || (office.employeeJobs?.Intern ?? 0) > (office.size >= 9 ? Math.ceil(office.size / 9) : 0))
         .map((/** @type {{division: string}} */ office) => office.division))]
         // Job changes take effect in the next cycle (employeeNextJobs): give a reassignment a minute to show.
         .filter((division) => !queuedNow.includes(`"division":"${division}"`) && Date.now() - (lastRebalance.get(division) ?? 0) > REBALANCE_PAUSE_MS);
@@ -193,7 +194,7 @@ export async function runCorporationManager(ns) {
         const time = Date.now();
         for (const division of unbalanced) lastRebalance.set(division, time);
         ns.write(REQUESTS_FILE, unbalanced.map((division) => JSON.stringify({ type: "office", division, city: "all", size: 0, budgetFraction: 0, jobs: null, time }) + "\n").join(""), "a");
-        log("staff", `unassigned employees or surplus interns in ${unbalanced.join(", ")}: jobs reassigned`);
+        log("staff", `empty slots, unassigned employees or surplus interns in ${unbalanced.join(", ")}: hired and jobs reassigned`);
       }
     }
 
