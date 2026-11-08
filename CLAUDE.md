@@ -12,7 +12,7 @@ wrong: read them in the game source (github bitburner-official/bitburner-src, br
 `~/develop/bitburner/bitburner` is an old v1.3.0 checkout: do not use it.
 
 ## Status (2026-10-30)
-- BitNode 9 (Hacktocracy), SF1.1 SF3.3 SF4.1 SF5.1, home 32 GB. Hacking money x0.001 (max money 0.01, script hack
+- BitNode 9 (Hacktocracy), SF1.1 SF3.3 SF4.1 SF5.1, home 2 TB. Hacking money x0.001 (max money 0.01, script hack
   money 0.1), hack exp x0.05, no cloud servers, home RAM cost x5. Multipliers: `run tools/bitnode-status.js`.
 - Plan (user): hacknet hashes -> $150b to found the corporation (no seed money outside BN3), then hashes into corp
   funds/research. start.js still runs (hacking for exp).
@@ -83,7 +83,9 @@ What is there:
   `tools/coding-contracts/test-solvers.js` first.
 - **Stocks**: `services/stock-trader-4s.js` or `stock-trader.js` (never both; `lib/stock-trading.js`).
   `stock-trader.js --capital <$>` trades with that much plus its profit and reserves the uninvested part (BN9 trial
-  2026-10-30, $10b capital: +$4.5b realised in ~1 h, mostly a few big trades). `tools/buy-stock-access.js` (WSE + TIX),
+  2026-10-30, $10b capital: +$4.5b realised in ~1 h, mostly a few big trades; second run from $12.06b reached
+  +$46b in 4.6 h, profit reinvested). `tools/sell-all-stocks.js` (stops the traders, sells everything, e.g. before
+  founding a corporation). `tools/buy-stock-access.js` (WSE + TIX),
   `tools/stock-servers.js` (company server per symbol, growable now), `services/stock-watch.js` (up-tick share per
   minute). Manipulation via grow(stock) measured useless in BN9 at hacking 97: ~0.4 hits/min with all hacking RAM on
   joesguns (0.1 forecast-target points per hit) against natural swings of ~30 points.
