@@ -23,8 +23,6 @@ const ADVERT_BASE_PRICE = 1e9, ADVERT_PRICE_MULT = 1.06;
 const MAX_ADVERTS_PER_ROUND = 20;
 // Share of the funds each reinvest round spends on corporation upgrades first (2026-11-08: 20% -> 60%, user's call for growth).
 const UPGRADES_SHARE = 0.6;
-// A restart must not postpone the growth by the whole --reinvest-minutes: the first reinvest comes this long after the start.
-const FIRST_REINVEST_DELAY_MS = 120_000;
 // Staffing (lib/corp-staffing.js, from the game code v3.0.1): every office puts researchShare of its workers on R&D (product
 // rating and material quality), except a product division's development city, which gets the fastest-development split;
 // the rest of every office gets the split with the most revenue (production, sales or both, judged from last cycle).
@@ -81,7 +79,7 @@ const SUPPLIER_GROWTH_PAUSE_MS = 3 * 60_000;
 //   tools/corp/limit-production.js (cap a material's production, e.g. Robots in Robotics),
 //   tools/corp/add-division.js (all set-up steps for a new division in one go).
 // --reinvest-minutes N (default 3, 0 = off) queues upgrades (60% of funds), main office (15%), all offices (10%) and boosts
-// (10%) of every product division every N minutes, plus 5% offices + 5% boosts for suppliers that cannot feed their importers
+// (10%) of every product division at the start and every N minutes, plus 5% offices + 5% boosts for suppliers that cannot feed their importers
 // (each request spends its share of the funds when it runs). Between those rounds a supplier whose exports take everything it
 // makes (nothing left to sell) grows by 3% offices + 3% boosts every 3 minutes until a surplus is left (sold at MP).
 // --upkeep-and-prices-only: only tea/parties, prices and requests queued by hand (no products, Wilson/Advert or
@@ -116,7 +114,7 @@ export async function runCorporationManager(ns) {
   let lastPricingNote = "";
   /** @type {Map<string, number>} supplier division -> time of its last growth step (reinvest or starved-supplier step) */
   const lastSupplierGrowth = new Map();
-  let lastStateTime = 0, lastPriceChange = 0, lastRequestTime = 0, lastReinvest = Date.now() - Math.max(0, Number(flags["reinvest-minutes"]) * 60_000 - FIRST_REINVEST_DELAY_MS), lastWaiting = "";
+  let lastStateTime = 0, lastPriceChange = 0, lastRequestTime = 0, lastReinvest = 0, lastWaiting = "";
   const log = (/** @type {string} */ event, /** @type {string} */ details) => appendLog(ns, LOG_FILE, event, details);
   const waiting = (/** @type {string} */ reason) => {
     if (reason !== lastWaiting) log("waiting", reason);
