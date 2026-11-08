@@ -89,7 +89,7 @@ What is there:
   `tools/stock-servers.js` (company server per symbol, growable now), `services/stock-watch.js` (up-tick share per
   minute). Manipulation via grow(stock) measured useless in BN9 at hacking 97: ~0.4 hits/min with all hacking RAM on
   joesguns (0.1 forecast-target points per hit) against natural swings of ~30 points.
-- **General tools**: `tools/backdoor/` (chains, all), `path`, `root`, `kill`, `kill-all`, `usage`, `state`,
+- **General tools**: `tools/backdoor/` (chains, all), `path`, `root`, `kill`, `kill-all`, `kill-duplicates` (keeps the newest process of a script; agent.js itself exits if one already runs), `usage`, `state`,
   `player-status`, `bitnode-status`, `bootstrap-purchases`, `money-sources` (income per source, measured over --seconds).
 
 ## Key facts (game code v3.0.1; details and more in the old CLAUDE.md, see above)

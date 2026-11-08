@@ -8,7 +8,11 @@
 //   advertising factor, ratio = max((popularity + 0.001) / awareness, 0.01) (0.01 without awareness).
 // - Markup limit = material quality / base markup of the material, or product effectiveRating / product markup.
 // - Above MP + markup limit the game sells potential x (markupLimit / (price - MP))^2, so the highest price that sells
-//   `target` per second is MP + markupLimit x sqrt(potential / target) (what Market-TA.II sets).
+//   `target` per second is MP + markupLimit x sqrt(potential / target) (what Market-TA.II sets). Between MP and MP + limit
+//   it sells exactly the potential, below MP potential x MP / price: a material whose target is above its potential is
+//   priced at MP x potential / target, or its stock never drains (2026-11-08: agrar's warehouses 90-98% full of Food,
+//   potential 6e4/s against 2.2e6/s, so no room for Water and too few Plants for memo). Products stay at MP or above
+//   (below MP = production cost they would sell at a loss).
 // - The product markup is hidden but fixed per product: measured from cycles that left stock while priced above
 //   MP + markup limit: markupLimit = (price - MP) x sqrt(sold / potential), markup = effectiveRating / markupLimit. A single
 //   measurement can be far off (2026-10-25: madig products priced ~1000x too low after one measurement during a supply
@@ -22,6 +26,8 @@
 //   measured; if it still sells out, the overshoot grows by that factor each cycle.
 
 const SOLD_OUT_TOLERANCE = 0.01;
+/** Lowest material price as a share of MP (a price of 0 or below would discard the stock). */
+const MIN_PRICE_SHARE = 1e-6;
 const DRAIN_CYCLES = { product: 5, material: 1 };
 const ESTIMATE_OVERSHOOT = 1.5;
 /** Markup measurements kept per product (about 3 cycles x 6 cities). */
@@ -108,11 +114,17 @@ export function marketTa2Delta(item, productMemory) {
     }
   }
   // How well the formula predicted the last cycle (logged; 1.00 = exact): sold = potential x min(1, (limit / delta)^2).
-  const predicted = item.delta > markupLimit ? potential * (markupLimit / item.delta) ** 2 : potential;
+  const predicted = item.delta > markupLimit ? potential * (markupLimit / item.delta) ** 2
+    : item.delta < 0 ? potential * item.marketPrice / Math.max(item.marketPrice + item.delta, MIN_PRICE_SHARE * item.marketPrice) : potential;
   const check = (stockLeft ? `, last cycle sold ${(item.sold / predicted).toFixed(2)} x predicted` : "")
     + (item.kind === "product" && (productMemory.probe ?? 1) > 1 ? `, sold out: probing x${(productMemory.probe ?? 1).toFixed(2)}` : "")
     + (item.kind === "product" ? `, ${productMemory.samples?.length ?? 0} markup samples` : "");
   const target = Math.max(item.supply, 1e-9) + item.leftover / (10 * DRAIN_CYCLES[item.kind]);
+  if (item.kind === "material" && target > potential) {
+    const share = Math.max(MIN_PRICE_SHARE, potential / target);
+    return { delta: item.marketPrice * (share - 1),
+      reason: `below MP: potential ${potential.toPrecision(3)}/s < ${target.toPrecision(3)}/s to sell${check}` };
+  }
   return {
     delta: markupLimit * Math.sqrt(potential / target),
     reason: `TA2 formula: limit ${markupLimit.toPrecision(3)}, potential ${potential.toPrecision(3)}/s for ${target.toPrecision(3)}/s${check}`,

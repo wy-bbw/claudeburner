@@ -10,6 +10,11 @@ const STALE_BEFORE_START_MS = 60_000;
 /** @param {NS} ns */
 export async function main(ns) {
   ns.disableLog("ALL");
+  // One agent only: two run every command twice (2026-11-08: two start scripts each spawned one, every manager started twice).
+  if (ns.ps("home").some((process) => process.filename === ns.getScriptName() && process.pid !== ns.pid)) {
+    ns.tprint("agent.js already running: this one exits");
+    return;
+  }
   let last = Number(ns.read(SEQ)) || 0;
   const staleBefore = Date.now() - STALE_BEFORE_START_MS; // seq is the bridge's Date.now() at queue time
   let firstFail = 0; // when the head command first failed to start (usually: RAM busy)
