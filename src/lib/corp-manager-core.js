@@ -202,9 +202,12 @@ export async function runCorporationManager(ns) {
     // Only on a state read entirely after the previous request: a request must see what the last one changed.
     const requests = (state.readStartTime ?? 0) > lastRequestTime ? ns.read(REQUESTS_FILE).split("\n").filter((line) => line.trim()) : [];
     if (requests.length) {
-      ns.write(REQUESTS_FILE, requests.slice(1).map((line) => line + "\n").join(""), "w");
+      // A new division first: behind a reinvest round (13 requests, ~20 s each) it would wait minutes with an empty office
+      // (2026-11-08: macces waited ~6 min, its first product at 0% with 3 unassigned employees).
+      const next = Math.max(0, requests.findIndex((line) => line.includes('"type":"add-division"')));
+      ns.write(REQUESTS_FILE, requests.filter((_, index) => index !== next).map((line) => line + "\n").join(""), "w");
       let request = null;
-      try { request = JSON.parse(requests[0]); } catch { log("failed", `unreadable request ${requests[0]}`); }
+      try { request = JSON.parse(requests[next]); } catch { log("failed", `unreadable request ${requests[next]}`); }
       if (request?.type === "boosts") await buyBoosts(ns, log, state, request);
       else if (request?.type === "upgrades") await buyUpgrades(ns, log, state, request);
       else if (request?.type === "office") await growOffices(ns, log, state, request);
