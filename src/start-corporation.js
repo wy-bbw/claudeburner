@@ -4,14 +4,14 @@ const AGENT = "agent.js";
 // itself) prices from the start; corp/supply.js buys the inputs (instead of the Smart Supply unlock), its product work waits until a product division exists.
 const CORPORATION_SERVICES = ["services/corp/status.js", "services/corp/supply.js", "services/corp/manager.js"];
 // Default for the corp manager's --reinvest-minutes (reinvest a share of the funds every N minutes; 0 = never).
-const DEFAULT_REINVEST_MINUTES = 3;
+const DEFAULT_REINVEST_MINUTES = 1;
 
 // start-corporation.js: the start for corporation BitNodes (BN3), instead of start.js. Starts the corporation services
 // on home and hands over to agent.js, but no hacking service and no hacking-economy home services (server-buyer,
 // metrics, darknet-orchestrator): home RAM stays free for the corporation scripts, whose calls cost 10-20 GB each.
 // Run start.js as well only if you want hacking experience (it starts those home services again).
 // A running service keeps its arguments: kill services/corp/manager.js first to change --reinvest-minutes.
-// Usage: run start-corporation.js [--reinvest-minutes 3]
+// Usage: run start-corporation.js [--reinvest-minutes 1]
 /** @param {NS} ns */
 export async function main(ns) {
   const options = ns.flags([["reinvest-minutes", DEFAULT_REINVEST_MINUTES]]);
