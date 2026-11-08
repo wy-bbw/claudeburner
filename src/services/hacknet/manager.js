@@ -23,23 +23,27 @@ const SPEND_MODES = ["auto", "money", "corporation-funds", "corporation-research
 //     12 h ends with ~35% more hashes/s than 6 h). The faster money grows, the shorter the best payback; with a nearer
 //     install, use a payback below the time left until it.
 //   - servers: spends the hashes by --spend
-//       auto                  money until a corporation exists, then corporation-funds
+//       auto                  corporation-funds once a corporation exists; before, money with --sell-for-money,
+//                             else the hashes are kept for the corporation
 //       money                 Sell for Money (4 hashes -> $1m)
 //       corporation-funds     Sell for Corporation Funds ($1b, the n-th costs 100n hashes)
 //       corporation-research  Exchange for Corporation Research (1k research per division, the n-th costs 200n hashes)
 //     A corporation upgrade that costs more than the hash storage buys the cheapest cache upgrade; until that is
-//     affordable the hashes are sold for money instead of overflowing.
+//     affordable the hashes are sold for money with --sell-for-money (off by default: hashes are for pushing the
+//     corporation; a full storage still overflows, the game sells the excess by itself).
+//   --sell-for-money: allow Sell for Money in auto mode and as the fallback above (--spend money always sells).
 // Production formulas from src/Hacknet/formulas (v3.0.1); the player and BitNode multiplier is measured from
 // the current production. Without Formulas.exe a new server counts only its own production.
 // Log (readable lines): data/hacknet.txt, a status line every 5 minutes.
-// Usage: run services/hacknet/manager.js [--payback-hours 12] [--reserve 0] [--spend auto]
+// Usage: run services/hacknet/manager.js [--payback-hours 12] [--reserve 0] [--spend auto] [--sell-for-money]
 /** @param {NS} ns */
 export async function main(ns) {
   ns.disableLog("ALL");
-  const flags = ns.flags([["payback-hours", 12], ["reserve", 0], ["spend", "auto"]]);
+  const flags = ns.flags([["payback-hours", 12], ["reserve", 0], ["spend", "auto"], ["sell-for-money", false]]);
   const paybackSeconds = Number(flags["payback-hours"]) * 3600;
   const reserve = Number(flags.reserve);
   const spend = String(flags.spend);
+  const sellForMoney = Boolean(flags["sell-for-money"]) || spend === "money";
   if (!SPEND_MODES.includes(spend)) {
     ns.tprint(`--spend must be one of ${SPEND_MODES.join(", ")}`);
     return;
@@ -48,11 +52,11 @@ export async function main(ns) {
   const log = (/** @type {string} */ event, /** @type {string} */ details) => appendLog(ns, LOG_FILE, event, details);
   const counters = newCounters();
   let lastStatusAt = Date.now(), corporationAffordableLogged = false;
-  log("start", `${isServers ? "hacknet servers (hashes)" : "hacknet nodes (money)"}, payback ${flags["payback-hours"]} h, reserve $${ns.format.number(reserve)}, spend ${spend}`);
+  log("start", `${isServers ? "hacknet servers (hashes)" : "hacknet nodes (money)"}, payback ${flags["payback-hours"]} h, reserve $${ns.format.number(reserve)}, spend ${spend}${sellForMoney ? ", sells hashes for money" : ", no hash sales"}`);
 
   while (true) {
     const hasCorporation = ns.corporation.hasCorporation();
-    const mode = spend !== "auto" ? spend : hasCorporation ? "corporation-funds" : "money";
+    const mode = spend !== "auto" ? spend : hasCorporation ? "corporation-funds" : sellForMoney ? "money" : "keep";
     const keep = reserve + reservedCash(ns);
 
     for (let purchases = 0; purchases < MAX_PURCHASES_PER_TICK; purchases++) {
@@ -64,7 +68,7 @@ export async function main(ns) {
       if (best.kind === "new") log("bought", `${isServers ? "server" : "node"} ${ns.hacknet.numNodes() - 1} for $${ns.format.number(best.cost)}`);
     }
 
-    if (isServers) spendHashes(ns, mode, keep, counters, log);
+    if (isServers) spendHashes(ns, mode, keep, sellForMoney, counters, log);
 
     if (mode === "money" && !hasCorporation && !corporationAffordableLogged && ns.getServerMoneyAvailable("home") >= CORPORATION_COST) {
       corporationAffordableLogged = true;
@@ -191,11 +195,11 @@ function buy(ns, upgrade) {
 }
 
 /**
- * Spends the stored hashes by mode (see the header).
- * @param {NS} ns @param {string} mode @param {number} reserve
+ * Spends the stored hashes by mode (see the header; "keep": auto mode without a corporation and without --sell-for-money).
+ * @param {NS} ns @param {string} mode @param {number} reserve @param {boolean} sellForMoney
  * @param {ReturnType<typeof newCounters>} counters @param {(event: string, details: string) => void} log
  */
-function spendHashes(ns, mode, reserve, counters, log) {
+function spendHashes(ns, mode, reserve, sellForMoney, counters, log) {
   const sellAll = () => {
     const count = Math.floor(ns.hacknet.numHashes() / 4);
     if (count > 0 && ns.hacknet.spendHashes(SELL_FOR_MONEY, "", count)) counters.hashMoney += count * 1e6;
@@ -204,6 +208,7 @@ function spendHashes(ns, mode, reserve, counters, log) {
     sellAll();
     return;
   }
+  if (mode === "keep") return;
   const upgrade = mode === "corporation-funds" ? CORPORATION_FUNDS : CORPORATION_RESEARCH;
   while (ns.hacknet.numHashes() >= ns.hacknet.hashCost(upgrade) && ns.hacknet.spendHashes(upgrade)) {
     if (upgrade === CORPORATION_FUNDS) counters.corporationFunds++;
@@ -220,7 +225,7 @@ function spendHashes(ns, mode, reserve, counters, log) {
     counters.bought.cache++;
     counters.moneySpent += cheapestCost;
     log("cache", `server ${cheapest} for $${ns.format.number(cheapestCost)}, storage ${ns.format.number(ns.hacknet.hashCapacity())} hashes, next ${upgrade} costs ${ns.format.number(ns.hacknet.hashCost(upgrade))}`);
-  } else {
+  } else if (sellForMoney) {
     sellAll();
   }
 }
