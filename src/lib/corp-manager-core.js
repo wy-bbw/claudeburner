@@ -20,7 +20,9 @@ const WILSON = "Wilson Analytics";
 // Upgrade cost = base price x price multiplier ^ level (game code).
 const WILSON_BASE_PRICE = 4e9, WILSON_PRICE_MULT = 2;
 const ADVERT_BASE_PRICE = 1e9, ADVERT_PRICE_MULT = 1.06;
-const MAX_ADVERTS_PER_ROUND = 20;
+// Only a guard against a runaway loop: the --advert-fraction rule limits the levels (2026-11-08: 20 per round could not keep
+// up with revenue growing several orders of magnitude per minute; one level paid back within a cycle).
+const MAX_ADVERTS_PER_ROUND = 1000;
 // Share of the funds each reinvest round spends on corporation upgrades first (2026-11-08: 20% -> 60%, user's call for growth).
 const UPGRADES_SHARE = 0.6;
 // Staffing (lib/corp-staffing.js, from the game code v3.0.1): every office puts researchShare of its workers on R&D (product
@@ -65,8 +67,8 @@ const SUPPLIER_GROWTH_PAUSE_MS = 3 * 60_000;
 //   Market-TA.II is researched, products use the game's own. --fixed-material-prices leaves materials alone.
 // - Energy and morale: tea and a party for every office more than 2 below the maximum (what the AutoBrew and
 //   AutoPartyManager research do, without spending RP).
-// - Wilson Analytics when it costs <= --wilson-fraction of funds (default 80%), then Advert levels for each product division
-//   while each costs <= --advert-fraction of funds. Wilson first and generously: every later Advert multiplies awareness and
+// - Wilson Analytics levels while each costs <= --wilson-fraction of the funds left (default 80%), then Advert levels for
+//   each product division while each costs <= --advert-fraction of the funds left. Wilson first and generously: every later Advert multiplies awareness and
 //   popularity by 1.005 x the Wilson multiplier (game code applyAdVert), so its effect compounds over all later Adverts.
 // Decisions use the corporation state read from the API in this process each round (lib/corp-direct.js: no state file);
 // after acting it waits for a newer state. Every action is its own 20 GB worker (workers/corp/do-*.js, answers by port).
@@ -272,10 +274,15 @@ export async function runCorporationManager(ns) {
 
     // Wilson Analytics first (corporation-wide, multiplies every later Advert), then Advert for each product division.
     if (!flags["hold-upgrades"] && funds > 0 && productDivisions.length) {
-      const wilsonCost = WILSON_BASE_PRICE * WILSON_PRICE_MULT ** (state.upgrades?.[WILSON] ?? 0);
-      if (wilsonCost <= funds * Number(flags["wilson-fraction"])) {
-        await report(ns, log, "level-upgrade", [[WILSON]]);
+      const wilsonLevels = [];
+      for (let level = state.upgrades?.[WILSON] ?? 0; ; level++) {
+        const wilsonCost = WILSON_BASE_PRICE * WILSON_PRICE_MULT ** level;
+        if (wilsonCost > funds * Number(flags["wilson-fraction"])) break;
+        wilsonLevels.push([WILSON]);
         funds -= wilsonCost;
+      }
+      if (wilsonLevels.length) {
+        await report(ns, log, "level-upgrade", wilsonLevels);
         acted = true;
       }
       for (const divisionData of productDivisions) {
