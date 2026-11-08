@@ -52,10 +52,15 @@ export async function main(ns) {
       if (!warehouse || warehouse.smartSupplyEnabled) continue;
       const rows = materials.filter((/** @type {{division: string, city: string}} */ entry) => entry.division === place.division && entry.city === place.city);
       const key = `${place.division}|${place.city}`;
-      const plan = planSupply(place.required, sizes, warehouse, rows, estimates.get(key) ?? 0);
+      const imports = importStatus(materials, place);
+      const plan = planSupply(place.required, sizes, warehouse, rows, estimates.get(key) ?? 0, imports);
       estimates.set(key, plan.estimate);
       for (const order of plan.orders) calls.push([place.division, place.city, order.material, order.rate]);
-      summary.push(`${key}: production ${plan.actual.toFixed(1)}/s${plan.short ? " SHORT" : ""}, buy ${plan.orders.map((order) => `${order.material} ${order.rate.toFixed(1)}/s`).join(", ")}`);
+      const imported = (/** @type {string} */ material) => {
+        const amount = rows.find((/** @type {{name: string}} */ entry) => entry.name === material)?.importAmount ?? 0;
+        return material in imports ? ` (import ${amount.toFixed(1)}/s, exporter ${imports[material]})` : "";
+      };
+      summary.push(`${key}: production ${plan.actual.toFixed(1)}/s${plan.short ? " SHORT" : ""}, buy ${plan.orders.map((order) => `${order.material} ${order.rate.toFixed(1)}/s${imported(order.material)}`).join(", ")}`);
     }
     if (dryRun) { for (const line of summary) log("plan", line); continue; }
     if (calls.length) await reportAction(ns, log, calls);
@@ -78,6 +83,24 @@ async function readPlaces(ns) {
   const warehouses = all.length ? await runReader(ns, "warehouses", [JSON.stringify(all.map(({ division, city }) => ({ division, city })))]) : [];
   const places = all.filter((place) => warehouses.some((/** @type {{division: string, city: string}} */ entry) => entry.division === place.division && entry.city === place.city));
   return { places, sizes: data.sizes };
+}
+
+/**
+ * Inputs exported to this division-city by other divisions, read from the exporters' rows after SALE: "surplus" when an
+ * exporter sold or kept some of it (the import could have been bigger), else "used-up".
+ * @param {{division: string, city: string, name: string, stored: number, actualSellAmount: number, exports: {division: string, city: string}[]}[]} materials
+ * @param {{division: string, city: string}} place
+ * @returns {Record<string, import("lib/corp-supply.js").ImportStatus>}
+ */
+function importStatus(materials, place) {
+  /** @type {Record<string, import("lib/corp-supply.js").ImportStatus>} */
+  const status = {};
+  for (const row of materials) {
+    if (!row.exports?.some((exported) => exported.division === place.division && exported.city === place.city)) continue;
+    const surplus = row.actualSellAmount > 0 || row.stored > 1;
+    status[row.name] = surplus || status[row.name] === "surplus" ? "surplus" : "used-up";
+  }
+  return status;
 }
 
 /** @param {NS} ns @param {(event: string, text: string) => void} log @param {unknown[][]} calls */
