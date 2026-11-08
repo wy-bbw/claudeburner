@@ -80,7 +80,7 @@ const SUPPLIER_GROWTH_PAUSE_MS = 3 * 60_000;
 //   tools/corp/expand.js (a division in every city), tools/corp/exports.js (supply chain exports between divisions),
 //   tools/corp/limit-production.js (cap a material's production, e.g. Robots in Robotics),
 //   tools/corp/add-division.js (all set-up steps for a new division in one go).
-// --reinvest-minutes N (default 5, 0 = off) queues upgrades (60% of funds), main office (15%), all offices (10%) and boosts
+// --reinvest-minutes N (default 3, 0 = off) queues upgrades (60% of funds), main office (15%), all offices (10%) and boosts
 // (10%) of every product division every N minutes, plus 5% offices + 5% boosts for suppliers that cannot feed their importers
 // (each request spends its share of the funds when it runs). Between those rounds a supplier whose exports take everything it
 // makes (nothing left to sell) grows by 3% offices + 3% boosts every 3 minutes until a surplus is left (sold at MP).
@@ -102,7 +102,7 @@ export async function runCorporationManager(ns) {
     ["hold-upgrades", false],
     ["upkeep-and-prices-only", false],
     ["fixed-material-prices", false],
-    ["reinvest-minutes", 5],
+    ["reinvest-minutes", 3],
     ["mode", "maintain"],
   ]);
   if (!(String(flags.mode) in RESEARCH_SHARE_BY_MODE)) throw new Error(`--mode must be grow or maintain, not ${flags.mode}`);
